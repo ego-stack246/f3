@@ -1,0 +1,16 @@
+from pydantic_settings import BaseSettings
+
+class Settings(BaseSettings):
+    PROJECT_NAME: str = "FitSync AI"
+    API_V1_STR: str = "/api/v1"
+    SECRET_KEY: str = "super_secret_key_change_in_production"
+    ACCESS_TOKEN_EXPIRE_MINUTES: int = 60 * 24 * 7 # 7 days
+    DATABASE_URL: str = "sqlite+aiosqlite:///./fitsync_local.db"
+    REDIS_URL: str = "redis://redis:6379/0"
+    GEMINI_API_KEY: str = "dummy_key"
+    CORS_ORIGINS: list[str] = ["*"]
+
+    class Config:
+        env_file = ".env"
+
+settings = Settings()

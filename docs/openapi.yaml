@@ -1,0 +1,227 @@
+openapi: 3.1.0
+info:
+  title: FitSync AI Backend API
+  version: 1.0.0
+  description: API for FitSync AI (Motion IQ) - handling workouts, AI coaching, nutrition, and wellness.
+servers:
+  - url: http://localhost:8000/api/v1
+    description: Local development server
+
+components:
+  securitySchemes:
+    bearerAuth:
+      type: http
+      scheme: bearer
+      bearerFormat: JWT
+
+  schemas:
+    ErrorResponse:
+      type: object
+      properties:
+        error:
+          type: object
+          properties:
+            code: { type: string }
+            message: { type: string }
+            details: { type: object, additionalProperties: true }
+      required: [error]
+
+    User:
+      type: object
+      properties:
+        id: { type: string, format: uuid }
+        email: { type: string, format: email }
+        name: { type: string }
+        age: { type: integer }
+        sex: { type: string, nullable: true }
+        height_cm: { type: number }
+        weight_kg: { type: number }
+        goal: { type: string, enum: [lose_fat, build_muscle, stay_active, improve_mobility] }
+        experience: { type: string, enum: [beginner, intermediate, advanced] }
+        diet_pref: { type: string, enum: [veg, non_veg, vegan, eggetarian] }
+        region_cuisine: { type: string, nullable: true }
+        equipment: { type: array, items: { type: string } }
+        leaderboard_opt_in: { type: boolean }
+        created_at: { type: string, format: date-time }
+      required: [id, email, name, age, height_cm, weight_kg, goal, experience, diet_pref, leaderboard_opt_in, created_at]
+
+    DailyCheckin:
+      type: object
+      properties:
+        id: { type: string, format: uuid }
+        user_id: { type: string, format: uuid }
+        date: { type: string, format: date }
+        sleep_hours: { type: number }
+        energy: { type: integer, minimum: 1, maximum: 5 }
+        mood: { type: integer, minimum: 1, maximum: 5 }
+        soreness: { type: integer, minimum: 1, maximum: 5 }
+        stress: { type: integer, minimum: 1, maximum: 5 }
+        minutes_available: { type: integer }
+        notes: { type: string, nullable: true }
+      required: [id, user_id, date, sleep_hours, energy, mood, soreness, stress, minutes_available]
+
+    Plan:
+      type: object
+      properties:
+        id: { type: string, format: uuid }
+        user_id: { type: string, format: uuid }
+        date: { type: string, format: date }
+        checkin_id: { type: string, format: uuid }
+        intensity_level: { type: string, enum: [rest, light, moderate, hard] }
+        rationale: { type: string }
+        plan_json: { type: object, additionalProperties: true }
+        source: { type: string, enum: [gemini, fallback_rules] }
+      required: [id, user_id, date, checkin_id, intensity_level, rationale, plan_json, source]
+
+    WorkoutSession:
+      type: object
+      properties:
+        id: { type: string, format: uuid }
+        user_id: { type: string, format: uuid }
+        client_id: { type: string, format: uuid }
+        exercise_id: { type: string, format: uuid }
+        started_at: { type: string, format: date-time }
+        duration_s: { type: integer }
+        reps: { type: integer }
+        sets: { type: integer }
+        avg_form_score: { type: integer }
+        form_issues: { type: array, items: { type: object } }
+        source: { type: string, enum: [pose_coach, manual] }
+      required: [id, user_id, client_id, exercise_id, started_at, duration_s, reps, sets, avg_form_score, form_issues, source]
+
+security:
+  - bearerAuth: []
+
+paths:
+  /auth/register:
+    post:
+      security: []
+      summary: Register a new user
+      requestBody:
+        required: true
+        content:
+          application/json:
+            schema:
+              type: object
+              properties:
+                email: { type: string }
+                password: { type: string }
+                name: { type: string }
+              required: [email, password, name]
+      responses:
+        '201':
+          description: User created
+          content:
+            application/json:
+              schema:
+                type: object
+                properties:
+                  access_token: { type: string }
+                  refresh_token: { type: string }
+                  user: { $ref: '#/components/schemas/User' }
+
+  /auth/login:
+    post:
+      security: []
+      summary: Login user
+      requestBody:
+        required: true
+        content:
+          application/json:
+            schema:
+              type: object
+              properties:
+                email: { type: string }
+                password: { type: string }
+              required: [email, password]
+      responses:
+        '200':
+          description: Logged in
+          content:
+            application/json:
+              schema:
+                type: object
+                properties:
+                  access_token: { type: string }
+                  refresh_token: { type: string }
+                  user: { $ref: '#/components/schemas/User' }
+
+  /users/me:
+    get:
+      summary: Get current user profile
+      responses:
+        '200':
+          description: User profile
+          content:
+            application/json:
+              schema:
+                $ref: '#/components/schemas/User'
+    patch:
+      summary: Update user profile
+      requestBody:
+        required: true
+        content:
+          application/json:
+            schema:
+              type: object
+              # Fields omitted for brevity but includes all updatable fields
+      responses:
+        '200':
+          description: User updated
+          content:
+            application/json:
+              schema:
+                $ref: '#/components/schemas/User'
+
+  /checkins:
+    post:
+      summary: Submit daily check-in
+      requestBody:
+        required: true
+        content:
+          application/json:
+            schema:
+              $ref: '#/components/schemas/DailyCheckin'
+      responses:
+        '201':
+          description: Check-in saved
+          content:
+            application/json:
+              schema:
+                $ref: '#/components/schemas/DailyCheckin'
+
+  /plans/generate:
+    post:
+      summary: Generate adaptive plan via Gemini
+      requestBody:
+        required: false
+        content:
+          application/json:
+            schema:
+              type: object
+              properties:
+                checkin_id: { type: string, format: uuid }
+      responses:
+        '200':
+          description: Plan generated
+          content:
+            application/json:
+              schema:
+                $ref: '#/components/schemas/Plan'
+
+  /sessions:
+    post:
+      summary: Log a workout session (idempotent)
+      requestBody:
+        required: true
+        content:
+          application/json:
+            schema:
+              $ref: '#/components/schemas/WorkoutSession'
+      responses:
+        '200':
+          description: Session saved or existing returned
+          content:
+            application/json:
+              schema:
+                $ref: '#/components/schemas/WorkoutSession'
