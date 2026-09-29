@@ -1,4 +1,4 @@
-@import url('https://fonts.googleapis.com/css2?family=Inter:wght@300;400;500;600;700&family=Outfit:wght@300;400;500;600;700&display=swap');
+@import url('https://fonts.googleapis.com/css2?family=Inter:wght@300;400;500;600;700;800;900&family=Outfit:wght@300;400;500;600;700;800;900&display=swap');
 
 @tailwind base;
 @tailwind components;
@@ -6,7 +6,7 @@
 
 @layer base {
   body {
-    @apply bg-cream-50 text-earth-900 font-sans antialiased selection:bg-sage-200 selection:text-sage-900;
+    @apply bg-cream-50 text-earth-900 font-sans antialiased selection:bg-sage-300 selection:text-sage-900 overflow-x-hidden;
   }
   
   h1, h2, h3, h4, h5, h6 {
@@ -16,21 +16,35 @@
 
 @layer components {
   .glass-card {
-    @apply bg-white/70 backdrop-blur-md border border-white/40 shadow-sm rounded-2xl;
+    @apply bg-white/60 backdrop-blur-xl border border-white/50 shadow-[0_8px_30px_rgb(0,0,0,0.04)] rounded-3xl transition-all duration-300 hover:shadow-[0_8px_30px_rgb(0,0,0,0.08)];
+  }
+  
+  .glass-panel {
+    @apply bg-white/40 backdrop-blur-2xl border border-white/60 shadow-[0_8px_30px_rgb(0,0,0,0.02)] rounded-3xl;
   }
   
   .btn-primary {
-    @apply bg-sage-500 hover:bg-sage-600 text-white transition-colors duration-300 rounded-full px-6 py-2.5 font-medium shadow-sm hover:shadow-md;
+    @apply bg-gradient-to-r from-sage-600 to-sage-500 hover:from-sage-700 hover:to-sage-600 text-white transition-all duration-300 rounded-full px-7 py-3 font-semibold shadow-[0_4px_14px_0_rgb(105,124,101,0.39)] hover:shadow-[0_6px_20px_rgba(105,124,101,0.23)] hover:-translate-y-0.5 active:translate-y-0;
   }
   
   .btn-secondary {
-    @apply bg-cream-200 hover:bg-cream-300 text-earth-900 transition-colors duration-300 rounded-full px-6 py-2.5 font-medium border border-cream-300;
+    @apply bg-white/80 backdrop-blur-sm hover:bg-white text-earth-900 transition-all duration-300 rounded-full px-7 py-3 font-semibold border border-earth-900/10 shadow-sm hover:shadow-md hover:-translate-y-0.5 active:translate-y-0;
+  }
+  
+  .text-gradient {
+    @apply bg-clip-text text-transparent bg-gradient-to-r from-sage-600 to-emerald-600;
   }
 }
 
-/* Custom Scrollbar for a smoother look */
+/* Fluid animations and scrollbar */
+::selection {
+  background-color: #cbd7cb;
+  color: #2d372c;
+}
+
 ::-webkit-scrollbar {
   width: 8px;
+  height: 8px;
 }
 
 ::-webkit-scrollbar-track {
@@ -39,9 +53,16 @@
  
 ::-webkit-scrollbar-thumb {
   background: #cbd7cb; 
-  border-radius: 4px;
+  border-radius: 10px;
 }
 
 ::-webkit-scrollbar-thumb:hover {
   background: #a3b19b; 
+}
+
+/* Noise overlay */
+.bg-noise {
+  background-image: url("data:image/svg+xml,%3Csvg viewBox='0 0 200 200' xmlns='http://www.w3.org/2000/svg'%3E%3Cfilter id='noiseFilter'%3E%3CfeTurbulence type='fractalNoise' baseFrequency='0.65' numOctaves='3' stitchTiles='stitch'/%3E%3C/filter%3E%3Crect width='100%25' height='100%25' filter='url(%23noiseFilter)'/%3E%3C/svg%3E");
+  opacity: 0.03;
+  pointer-events: none;
 }

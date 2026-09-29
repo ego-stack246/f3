@@ -291,7 +291,7 @@ export function usePoseDetection({ exercise, enabled }: UsePoseDetectionOptions)
       poseLandmarkerRef.current = await PoseLandmarker.createFromOptions(vision, {
         baseOptions: {
           modelAssetPath:
-            'https://storage.googleapis.com/mediapipe-models/pose_landmarker/pose_landmarker_lite/float16/1/pose_landmarker_lite.task',
+            'https://storage.googleapis.com/mediapipe-models/pose_landmarker/pose_landmarker_full/float16/1/pose_landmarker_full.task',
           delegate: 'GPU',
         },
         runningMode: 'VIDEO',
@@ -309,7 +309,7 @@ export function usePoseDetection({ exercise, enabled }: UsePoseDetectionOptions)
   const startCamera = useCallback(async () => {
     try {
       const stream = await navigator.mediaDevices.getUserMedia({
-        video: { width: 640, height: 480, facingMode: 'user' },
+        video: { width: 1280, height: 720, facingMode: 'user' },
       });
       if (videoRef.current) {
         videoRef.current.srcObject = stream;
@@ -458,7 +458,8 @@ export function usePoseDetection({ exercise, enabled }: UsePoseDetectionOptions)
     }
 
     const now = performance.now();
-    if (now === lastTimestampRef.current) {
+    // Throttle to ~30 FPS for smoothness & efficiency
+    if (now - lastTimestampRef.current < 33) {
       animFrameRef.current = requestAnimationFrame(detectPose);
       return;
     }

@@ -14,6 +14,9 @@ export default function Login() {
   const [name, setName] = useState('');
   const [email, setEmail] = useState('');
   const [password, setPassword] = useState('');
+  const [age, setAge] = useState('');
+  const [gender, setGender] = useState('');
+  const [showWelcome, setShowWelcome] = useState(false);
   const [showPassword, setShowPassword] = useState(false);
   const [isLoading, setIsLoading] = useState(false);
   const [showGoogleModal, setShowGoogleModal] = useState(false);
@@ -63,7 +66,23 @@ export default function Login() {
     }
   }, [isLoggedIn]);
 
-  if (isLoggedIn) {
+  if (showWelcome) {
+    return (
+      <div className="min-h-[70vh] flex items-center justify-center p-4">
+        <div className="glass-card max-w-md w-full p-10 text-center space-y-6 animate-scale-in">
+          <div className="w-20 h-20 bg-emerald-100 rounded-full flex items-center justify-center mx-auto shadow-inner">
+            <Sparkles className="w-10 h-10 text-emerald-500" />
+          </div>
+          <h2 className="text-3xl font-bold text-earth-900">Welcome, {name || 'Fitness Enthusiast'}! 🎉</h2>
+          <p className="text-earth-800/80">
+            Your account has been created successfully. We're redirecting you to quickly set up your fitness profile...
+          </p>
+        </div>
+      </div>
+    );
+  }
+
+  if (isLoggedIn && !showWelcome) {
     return (
       <div className="min-h-[70vh] flex items-center justify-center p-4">
         <div className="glass-card max-w-md w-full p-8 text-center space-y-6 animate-scale-in">
@@ -98,15 +117,19 @@ export default function Login() {
     try {
       if (mode === 'login') {
         await loginWithEmail(email);
+        navigate('/dashboard');
       } else {
         if (!name) {
           setError('Please enter your full name.');
           setIsLoading(false);
           return;
         }
-        await signupWithEmail(name, email);
+        await signupWithEmail(name, email, age, gender);
+        setShowWelcome(true);
+        setTimeout(() => {
+          navigate('/onboarding');
+        }, 2000);
       }
-      navigate('/dashboard');
     } catch {
       setError('Authentication failed. Please try again.');
     } finally {
@@ -218,20 +241,49 @@ export default function Login() {
             )}
 
             {mode === 'signup' && (
-              <div>
-                <label className="text-xs font-semibold text-earth-800/70 block mb-1">Full Name</label>
-                <div className="relative">
-                  <UserIcon className="w-4 h-4 text-earth-800/40 absolute left-3.5 top-1/2 -translate-y-1/2" />
-                  <input
-                    type="text"
-                    required
-                    placeholder="Alex Rivera"
-                    value={name}
-                    onChange={(e) => setName(e.target.value)}
-                    className="w-full pl-10 pr-4 py-2.5 rounded-xl border border-earth-900/10 bg-white focus:outline-none focus:ring-2 focus:ring-sage-500 text-sm"
-                  />
+              <>
+                <div>
+                  <label className="text-xs font-semibold text-earth-800/70 block mb-1">Full Name</label>
+                  <div className="relative">
+                    <UserIcon className="w-4 h-4 text-earth-800/40 absolute left-3.5 top-1/2 -translate-y-1/2" />
+                    <input
+                      type="text"
+                      required
+                      placeholder="Alex Rivera"
+                      value={name}
+                      onChange={(e) => setName(e.target.value)}
+                      className="w-full pl-10 pr-4 py-2.5 rounded-xl border border-earth-900/10 bg-white focus:outline-none focus:ring-2 focus:ring-sage-500 text-sm"
+                    />
+                  </div>
                 </div>
-              </div>
+                <div className="flex gap-4">
+                  <div className="flex-1">
+                    <label className="text-xs font-semibold text-earth-800/70 block mb-1">Age</label>
+                    <input
+                      type="number"
+                      required
+                      placeholder="e.g. 24"
+                      value={age}
+                      onChange={(e) => setAge(e.target.value)}
+                      className="w-full px-4 py-2.5 rounded-xl border border-earth-900/10 bg-white focus:outline-none focus:ring-2 focus:ring-sage-500 text-sm"
+                    />
+                  </div>
+                  <div className="flex-1">
+                    <label className="text-xs font-semibold text-earth-800/70 block mb-1">Gender</label>
+                    <select
+                      required
+                      value={gender}
+                      onChange={(e) => setGender(e.target.value)}
+                      className="w-full px-4 py-2.5 rounded-xl border border-earth-900/10 bg-white focus:outline-none focus:ring-2 focus:ring-sage-500 text-sm appearance-none"
+                    >
+                      <option value="" disabled>Select...</option>
+                      <option value="male">Male</option>
+                      <option value="female">Female</option>
+                      <option value="other">Other</option>
+                    </select>
+                  </div>
+                </div>
+              </>
             )}
 
             <div>

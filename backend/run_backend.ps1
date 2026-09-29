@@ -1,7 +1,7 @@
 $ErrorActionPreference = "Stop"
 
 Write-Host "Creating Python virtual environment..."
-python -m venv venv
+py -3.12 -m venv venv
 
 Write-Host "Activating virtual environment..."
 .\venv\Scripts\Activate.ps1

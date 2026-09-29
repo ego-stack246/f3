@@ -3,8 +3,6 @@ import { X, Play, Camera, CheckCircle2, AlertTriangle, Dumbbell, Flame, Clock, R
 import { motion, AnimatePresence } from 'framer-motion';
 import PoseCamera from './PoseCamera';
 import type { ExerciseType } from '../lib/poseAnalysis';
-import ExerciseFigure from './exercise/ExerciseFigure';
-import { getExerciseKeyframes } from '../data/exerciseKeyframes';
 
 export interface WorkoutDetail {
   id: number;
@@ -32,49 +30,10 @@ interface ExerciseDetailModalProps {
 }
 
 
-function ExerciseAnimationPlayer({ title }: { title: string }) {
-  const [isPlaying, setIsPlaying] = useState(true);
-  const [speed, setSpeed] = useState(1);
-  const data = getExerciseKeyframes(title);
-
+function ExerciseAnimationPlayer({ title, imageUrl }: { title: string, imageUrl: string }) {
   return (
-    <div className="relative aspect-video bg-slate-900 rounded-3xl overflow-hidden shadow-2xl border border-white/10 flex items-center justify-center flex-col md:flex-row gap-8 p-6 group">
-      <div className="flex-1 max-w-[200px]">
-        <ExerciseFigure
-          keyframes={data.keyframes}
-          tempoMs={2000 / speed}
-          loop={isPlaying}
-          size={200}
-        />
-      </div>
-      
-      <div className="flex-1 flex flex-col gap-4 z-10 w-full">
-        <h4 className="text-white font-bold text-lg mb-2 border-b border-white/10 pb-2">Target Phases</h4>
-        <div className="space-y-3">
-          {data.phases.map((phase, idx) => (
-            <div key={idx} className="flex gap-3 items-start text-sm text-white/80">
-              <span className="flex items-center justify-center w-5 h-5 rounded-full bg-sage-500/30 text-sage-300 text-xs font-bold shrink-0">{idx + 1}</span>
-              <p>{phase}</p>
-            </div>
-          ))}
-        </div>
-        
-        <div className="mt-4 pt-4 border-t border-white/10 flex items-center justify-between">
-          <button 
-            onClick={() => setIsPlaying(!isPlaying)}
-            className="flex items-center gap-2 bg-white/10 hover:bg-white/20 px-4 py-2 rounded-xl text-sm font-semibold transition-colors"
-          >
-            {isPlaying ? <span className="flex items-center gap-2"><span className="w-2 h-3 border-l-2 border-r-2 border-white inline-block"></span> Pause</span> : <span className="flex items-center gap-2"><Play className="w-4 h-4"/> Play</span>}
-          </button>
-          
-          <button 
-            onClick={() => setSpeed(s => s === 1 ? 0.5 : s === 0.5 ? 2 : 1)}
-            className="text-xs bg-white/5 hover:bg-white/10 px-3 py-1.5 rounded-lg border border-white/10"
-          >
-            {speed}x Speed
-          </button>
-        </div>
-      </div>
+    <div className="relative aspect-video bg-white rounded-3xl overflow-hidden shadow-2xl border border-white/10 flex items-center justify-center p-2 group">
+      <img src={imageUrl} alt={title} className="w-full h-full object-contain mix-blend-multiply" />
     </div>
   );
 }
@@ -178,7 +137,7 @@ export default function ExerciseDetailModal({ workout, isOpen, onClose }: Exerci
                       <Play className="w-4 h-4" /> Exercise Demonstration
                     </h3>
                   </div>
-                  <ExerciseAnimationPlayer title={workout.title} />
+                  <ExerciseAnimationPlayer title={workout.title} imageUrl={workout.image} />
                 </div>
 
                 <div className="grid grid-cols-2 sm:grid-cols-4 gap-4">

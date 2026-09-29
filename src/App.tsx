@@ -10,6 +10,8 @@ import Leaderboard from './pages/Leaderboard';
 import Login from './pages/Login';
 import TargetedMuscle from './pages/TargetedMuscle';
 import AnimationsDemo from './pages/AnimationsDemo';
+import ExerciseLibrary from './pages/ExerciseLibrary';
+import Onboarding from './pages/Onboarding';
 import ProtectedRoute from './components/ProtectedRoute';
 
 function App() {
@@ -30,6 +32,8 @@ function App() {
               <Route path="leaderboard" element={<Leaderboard />} />
               <Route path="targeted-muscle" element={<TargetedMuscle />} />
               <Route path="animations" element={<AnimationsDemo />} />
+              <Route path="library" element={<ExerciseLibrary />} />
+              <Route path="onboarding" element={<Onboarding />} />
             </Route>
           </Route>
         </Routes>

@@ -1,10 +1,4 @@
-import { GoogleGenAI } from '@google/genai';
-
-const apiKey = import.meta.env.VITE_GEMINI_API_KEY as string;
-
-const hasValidFormatKey = apiKey && apiKey.startsWith('AIzaSy');
-
-export const ai = new GoogleGenAI({ apiKey: hasValidFormatKey ? apiKey : 'dummy_key' });
+// We've swapped out Gemini for OpenRouter with GPT-4o based on your snippet!
 
 /**
  * MET values table for popular exercises
@@ -41,13 +35,54 @@ export async function safeGenerateContent(params: {
   contents: any;
   config?: any;
 }) {
-  if (hasValidFormatKey) {
-    try {
-      const response = await ai.models.generateContent(params);
-      if (response && response.text) return response;
-    } catch (err) {
-      console.warn('Live Gemini API call failed, using built-in smart AI fallback:', err);
+  try {
+    const systemInstStr = typeof params.config?.systemInstruction === 'string'
+      ? params.config.systemInstruction
+      : params.config?.systemInstruction?.parts?.[0]?.text || JSON.stringify(params.config?.systemInstruction || '');
+
+    const messages = [];
+    if (systemInstStr && systemInstStr !== '""') {
+      messages.push({ role: 'system', content: systemInstStr });
     }
+
+    if (Array.isArray(params.contents)) {
+      for (const msg of params.contents) {
+        messages.push({
+          role: msg.role === 'model' ? 'assistant' : 'user',
+          content: msg.parts?.[0]?.text || ''
+        });
+      }
+    } else if (typeof params.contents === 'string') {
+      messages.push({ role: 'user', content: params.contents });
+    } else {
+      messages.push({ role: 'user', content: JSON.stringify(params.contents) });
+    }
+
+    const response = await fetch('https://openrouter.ai/api/v1/chat/completions', {
+      method: 'POST',
+      headers: {
+        Authorization: `Bearer ${import.meta.env.VITE_OPENROUTER_API_KEY || 'sk-or-v1-fallback'}`,
+        'HTTP-Referer': window.location.origin,
+        'X-Title': 'FitSynchAI',
+        'Content-Type': 'application/json',
+      },
+      body: JSON.stringify({
+        model: 'openrouter/free', // Automatically routes to the best available free model
+        messages: messages,
+      }),
+    });
+
+    if (response.ok) {
+      const data = await response.json();
+      return { text: data.choices[0].message.content };
+    } else {
+      const errorText = await response.text();
+      console.error("OpenRouter API error:", errorText);
+      return { text: `⚠️ OpenRouter API Error: ${errorText}` };
+    }
+  } catch (err: any) {
+    console.warn('OpenRouter API call failed:', err);
+    return { text: `⚠️ Fetch Error: ${err.message}` };
   }
 
   // --- LOCAL SMART AI FALLBACK ---

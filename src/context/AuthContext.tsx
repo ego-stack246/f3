@@ -12,13 +12,18 @@ export interface User {
   joinedDate: string;
   targetCalories: number;
   postureScore: number;
+  age?: string;
+  gender?: string;
+  height?: string;
+  weight?: string;
+  goals?: string;
 }
 
 interface AuthContextType {
   user: User | null;
   isLoggedIn: boolean;
   loginWithEmail: (email: string) => Promise<boolean>;
-  signupWithEmail: (name: string, email: string) => Promise<boolean>;
+  signupWithEmail: (name: string, email: string, age?: string, gender?: string) => Promise<boolean>;
   loginWithGoogle: (customUser?: Partial<User>) => Promise<void>;
   logout: () => void;
   updateProfile: (updates: Partial<User>) => void;
@@ -71,7 +76,7 @@ export const AuthProvider: React.FC<{ children: React.ReactNode }> = ({ children
     return true;
   };
 
-  const signupWithEmail = async (name: string, email: string): Promise<boolean> => {
+  const signupWithEmail = async (name: string, email: string, age?: string, gender?: string): Promise<boolean> => {
     await new Promise((resolve) => setTimeout(resolve, 600));
     const newUser: User = {
       id: `usr_email_${Date.now()}`,
@@ -85,6 +90,8 @@ export const AuthProvider: React.FC<{ children: React.ReactNode }> = ({ children
       joinedDate: 'Today',
       targetCalories: 2000,
       postureScore: 88,
+      age,
+      gender,
     };
     setUser(newUser);
     return true;

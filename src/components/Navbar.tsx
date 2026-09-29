@@ -1,5 +1,5 @@
 import { NavLink, Link, useNavigate } from 'react-router-dom';
-import { Dumbbell, LayoutDashboard, Play, Activity, Calculator, Trophy, Menu, X, LogIn, LogOut, User as UserIcon, Flame, ChevronDown, ShieldCheck, Accessibility } from 'lucide-react';
+import { Dumbbell, LayoutDashboard, Play, Activity, Calculator, Trophy, Menu, X, LogIn, LogOut, User as UserIcon, Flame, ShieldCheck, Accessibility } from 'lucide-react';
 import { useState, useRef, useEffect } from 'react';
 import { cn } from '../lib/utils';
 import { useAuth } from '../context/AuthContext';
@@ -31,6 +31,7 @@ export default function Navbar() {
       { to: '/targeted-muscle', label: 'Targeted Muscle', icon: Accessibility },
       { to: '/workouts', label: 'Workouts', icon: Play },
       { to: '/posture', label: 'AI Posture Coach', icon: Activity },
+      { to: '/library', label: 'Exercise Library', icon: Activity },
       { to: '/calculator', label: 'Calorie Calc', icon: Calculator },
       { to: '/leaderboard', label: 'Leaderboard', icon: Trophy },
     ] : [])
@@ -38,32 +39,39 @@ export default function Navbar() {
 
   return (
     <>
-      <nav className="sticky top-0 z-50 glass-card mx-4 mt-4 px-6 py-3.5 flex items-center justify-between shadow-sm">
+      <div className="w-full flex justify-center px-4 pt-6 pb-2 z-50 sticky top-0 pointer-events-none">
+      <nav className="pointer-events-auto w-full max-w-6xl bg-white/80 backdrop-blur-xl border border-earth-900/10 rounded-full px-5 py-3 flex items-center justify-between shadow-[0_8px_30px_rgb(0,0,0,0.04)] transition-all">
         {/* Brand Logo */}
-        <Link to="/" className="flex items-center gap-3 group">
-          <div className="bg-sage-100 p-2 rounded-xl group-hover:bg-sage-200 transition-colors">
-            <Dumbbell className="text-sage-700 w-6 h-6" />
+        <Link to="/" className="flex items-center gap-2.5 group">
+          <div className="bg-earth-900 p-2 rounded-full group-hover:bg-earth-800 transition-colors">
+            <Dumbbell className="text-white w-4 h-4" />
           </div>
-          <span className="font-display font-semibold text-xl tracking-wide text-earth-900">
-            FitSynch<span className="text-sage-600 font-bold">AI</span>
+          <span className="font-display font-bold text-lg tracking-tight text-earth-900">
+            FitSynch<span className="text-sage-600">AI</span>
           </span>
         </Link>
 
         {/* Desktop Nav Links */}
-        <div className="hidden lg:flex items-center gap-6">
+        <div className="hidden lg:flex items-center gap-1.5">
           {links.map((link) => (
             <NavLink
               key={link.to}
               to={link.to}
               className={({ isActive }) =>
                 cn(
-                  "flex items-center gap-2 text-sm font-medium transition-colors hover:text-sage-600 py-1",
-                  isActive ? "text-sage-700 font-semibold" : "text-earth-800/70"
+                  "flex items-center gap-2 text-[13px] font-semibold transition-all duration-200 py-2 px-3.5 rounded-full",
+                  isActive 
+                    ? "bg-earth-900 text-white shadow-sm" 
+                    : "text-earth-600 hover:bg-earth-100/50 hover:text-earth-900"
                 )
               }
             >
-              <link.icon className="w-4 h-4" />
-              {link.label}
+              {({ isActive }) => (
+                <>
+                  <link.icon className={cn("w-3.5 h-3.5", isActive ? "text-white" : "text-earth-500")} />
+                  {link.label}
+                </>
+              )}
             </NavLink>
           ))}
         </div>
@@ -75,27 +83,27 @@ export default function Navbar() {
               {/* Profile Badge in Top Right Corner */}
               <button
                 onClick={() => setIsProfileMenuOpen(!isProfileMenuOpen)}
-                className="flex items-center gap-2.5 p-1.5 pl-2.5 rounded-full bg-white/70 hover:bg-white border border-earth-900/10 hover:border-sage-400 transition-all shadow-sm group"
+                className="flex items-center gap-2.5 p-1 pl-3 rounded-full hover:bg-earth-100/50 border border-transparent hover:border-earth-200 transition-all group"
               >
-                <div className="flex items-center gap-1.5 text-xs font-bold text-orange-600 bg-orange-100 px-2 py-0.5 rounded-full">
+                <div className="flex items-center gap-1 text-[11px] font-bold text-orange-600">
                   <Flame className="w-3.5 h-3.5 fill-orange-500" />
                   <span>{user.streak}d</span>
                 </div>
 
-                <span className="text-xs font-bold text-earth-900 hidden sm:inline-block max-w-[100px] truncate">
+                <div className="w-px h-4 bg-earth-200 mx-1 hidden sm:block" />
+
+                <span className="text-[13px] font-semibold text-earth-900 hidden sm:inline-block max-w-[100px] truncate">
                   {user.name.split(' ')[0]}
                 </span>
 
-                <div className="relative">
+                <div className="relative ml-1">
                   <img
                     src={user.avatar}
                     alt={user.name}
-                    className="w-8 h-8 rounded-full object-cover border-2 border-sage-500 group-hover:scale-105 transition-transform"
+                    className="w-8 h-8 rounded-full object-cover border border-earth-200 shadow-sm"
                   />
-                  <div className="absolute bottom-0 right-0 w-2.5 h-2.5 rounded-full bg-emerald-500 border border-white" />
+                  <div className="absolute -bottom-0.5 -right-0.5 w-2.5 h-2.5 rounded-full bg-green-500 border-2 border-white" />
                 </div>
-
-                <ChevronDown className="w-3.5 h-3.5 text-earth-800/60 group-hover:text-earth-800 transition-transform" />
               </button>
 
               {/* User Dropdown Menu */}
@@ -155,7 +163,7 @@ export default function Navbar() {
           ) : (
             <Link
               to="/login"
-              className="btn-primary flex items-center gap-2 py-2 px-4 text-xs font-bold shadow-sm"
+              className="flex items-center gap-2 py-2 px-5 bg-earth-900 hover:bg-earth-800 text-white rounded-full text-[13px] font-semibold shadow-sm transition-colors"
             >
               <LogIn className="w-4 h-4" /> Sign In
             </Link>
@@ -163,16 +171,16 @@ export default function Navbar() {
 
           {/* Mobile Toggle Button */}
           <button
-            className="lg:hidden text-earth-800 p-2 rounded-xl hover:bg-white/50"
+            className="lg:hidden text-earth-600 p-2 rounded-full hover:bg-earth-100 transition-colors"
             onClick={() => setIsOpen(!isOpen)}
           >
-            {isOpen ? <X className="w-6 h-6" /> : <Menu className="w-6 h-6" />}
+            {isOpen ? <X className="w-5 h-5" /> : <Menu className="w-5 h-5" />}
           </button>
         </div>
 
         {/* Mobile Nav Drawer */}
         {isOpen && (
-          <div className="absolute top-full left-0 right-0 mt-2 glass-card p-4 flex flex-col gap-2 lg:hidden shadow-xl animate-slide-up z-50">
+          <div className="absolute top-full left-0 right-0 mt-3 p-2 flex flex-col gap-1 lg:hidden bg-white/95 backdrop-blur-xl border border-earth-200 rounded-3xl shadow-xl animate-fade-in z-50">
             {links.map((link) => (
               <NavLink
                 key={link.to}
@@ -180,18 +188,25 @@ export default function Navbar() {
                 onClick={() => setIsOpen(false)}
                 className={({ isActive }) =>
                   cn(
-                    "flex items-center gap-3 text-sm font-medium p-3 rounded-xl transition-colors",
-                    isActive ? "bg-sage-100 text-sage-800 font-bold" : "text-earth-800 hover:bg-cream-100"
+                    "flex items-center gap-3 text-sm font-semibold p-3.5 rounded-2xl transition-colors",
+                    isActive 
+                      ? "bg-earth-900 text-white" 
+                      : "text-earth-700 hover:bg-earth-50"
                   )
                 }
               >
-                <link.icon className="w-5 h-5 text-sage-600" />
-                {link.label}
+                {({ isActive }) => (
+                  <>
+                    <link.icon className={cn("w-4 h-4", isActive ? "text-white" : "text-earth-400")} />
+                    {link.label}
+                  </>
+                )}
               </NavLink>
             ))}
           </div>
         )}
       </nav>
+    </div>
 
       {/* Profile Modal */}
       <ProfileModal
