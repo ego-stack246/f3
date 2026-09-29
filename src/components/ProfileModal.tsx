@@ -37,7 +37,7 @@ export default function ProfileModal({ isOpen, onClose }: ProfileModalProps) {
         <div className="h-28 bg-gradient-to-r from-sage-600 to-emerald-700 p-6 flex justify-between items-start">
           <div className="flex items-center gap-2 text-white/90 text-xs font-semibold bg-white/20 backdrop-blur px-3 py-1 rounded-full">
             <ShieldCheck className="w-4 h-4 text-emerald-300" />
-            {user.provider === 'google' ? 'Verified Google Account' : 'FitSynchAI Member'}
+            {user.provider === 'google' ? 'Verified Google Account' : 'FitSync AI Member'}
           </div>
           <button
             onClick={onClose}

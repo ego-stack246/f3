@@ -19,5 +19,7 @@ class User(Base):
     diet_pref = Column(String)
     region_cuisine = Column(String, nullable=True)
     equipment = Column(JSON, default=[])
-    leaderboard_opt_in = Column(Boolean, default=False)
+    username = Column(String, unique=True, index=True, nullable=True)
+    avatar = Column(String, nullable=True)
+    leaderboard_opt_in = Column(Boolean, default=True)
     created_at = Column(DateTime, default=datetime.datetime.utcnow)

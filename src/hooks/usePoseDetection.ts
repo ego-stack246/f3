@@ -5,6 +5,7 @@ import {
   POSE_LANDMARKS,
   calculateAngle,
   calculateSpineLean,
+  getBilateralAngle,
   analyzePosture,
   type ExerciseType,
   type PostureResult,
@@ -44,34 +45,39 @@ export function usePoseDetection({ exercise, enabled }: UsePoseDetectionOptions)
   const animFrameRef = useRef<number>(0);
   const lastTimestampRef = useRef<number>(-1);
   const lastSpeechTimeRef = useRef<number>(0);
-  
+  const lastRepTimeRef = useRef<number>(0);
+  const inflectionDwellRef = useRef<number>(0);
+
+  // Landmark temporal smoothing cache (Dynamic EMA filter)
+  const smoothedLandmarksRef = useRef<Point3D[] | null>(null);
+
   // Audio configuration
   const synth = typeof window !== 'undefined' ? window.speechSynthesis : null;
 
-  const speak = useCallback((text: string) => {
-    if (!synth) return;
-    const now = Date.now();
-    // Throttle speech to avoid overlapping/spamming (every 3 seconds for non-rep feedback)
-    if (now - lastSpeechTimeRef.current < 2500) return;
-    
-    // Check if speaking
-    if (synth.speaking) synth.cancel();
+  const speak = useCallback(
+    (text: string, isPriority = false) => {
+      if (!synth) return;
+      const now = Date.now();
+      // Throttle speech to avoid overlapping/spamming (every 3s for corrective feedback; immediate for rep counts)
+      if (!isPriority && now - lastSpeechTimeRef.current < 3000) return;
 
-    const utterance = new SpeechSynthesisUtterance(text);
-    utterance.rate = 1.0;
-    utterance.pitch = 1.0;
-    
-    // Try to find an English voice, preferably female as it often sounds friendlier
-    const voices = synth.getVoices();
-    const voice = voices.find(v => v.lang.startsWith('en') && v.name.includes('Female')) 
-               || voices.find(v => v.lang.startsWith('en'));
-    if (voice) {
-      utterance.voice = voice;
-    }
+      if (synth.speaking) synth.cancel();
 
-    synth.speak(utterance);
-    lastSpeechTimeRef.current = now;
-  }, [synth]);
+      const utterance = new SpeechSynthesisUtterance(text);
+      utterance.rate = isPriority ? 1.15 : 1.0;
+      utterance.pitch = 1.0;
+
+      const voices = synth.getVoices();
+      const voice =
+        voices.find((v) => v.lang.startsWith('en') && v.name.includes('Female')) ||
+        voices.find((v) => v.lang.startsWith('en'));
+      if (voice) utterance.voice = voice;
+
+      synth.speak(utterance);
+      lastSpeechTimeRef.current = now;
+    },
+    [synth]
+  );
 
   // Rep & Posture tracking refs
   const repStateRef = useRef<'up' | 'down'>('up');
@@ -98,8 +104,11 @@ export function usePoseDetection({ exercise, enabled }: UsePoseDetectionOptions)
     goodFramesRef.current = 0;
     totalFramesRef.current = 0;
     repStateRef.current = 'up';
+    inflectionDwellRef.current = 0;
     startTimeRef.current = Date.now();
     lastSpeechTimeRef.current = 0;
+    lastRepTimeRef.current = 0;
+    smoothedLandmarksRef.current = null;
     setStats({ reps: 0, postureScore: 100, elapsedSeconds: 0, calories: 0 });
     if (synth) synth.cancel();
   }, [synth]);
@@ -121,166 +130,298 @@ export function usePoseDetection({ exercise, enabled }: UsePoseDetectionOptions)
     return () => clearInterval(interval);
   }, [enabled, isCameraReady]);
 
-  // Rep detection state machine for ALL exercises
-  const checkRepetition = useCallback((lm: Point3D[], exType: ExerciseType) => {
-    if (!lm || lm.length === 0) return;
-    
-    let previousReps = repsRef.current;
+  /**
+   * Landmark Smoothing Filter:
+   * Smooths jitter using an adaptive velocity-responsive EMA.
+   * High alpha for rapid intentional motion, low alpha for holding still.
+   */
+  const smoothLandmarks = useCallback((raw: Point3D[]): Point3D[] => {
+    if (!smoothedLandmarksRef.current || smoothedLandmarksRef.current.length !== raw.length) {
+      smoothedLandmarksRef.current = raw.map((p) => ({ ...p }));
+      return raw;
+    }
 
-    if (exType === 'squat') {
-      const leftKnee = calculateAngle(lm[POSE_LANDMARKS.LEFT_HIP], lm[POSE_LANDMARKS.LEFT_KNEE], lm[POSE_LANDMARKS.LEFT_ANKLE]);
-      const rightKnee = calculateAngle(lm[POSE_LANDMARKS.RIGHT_HIP], lm[POSE_LANDMARKS.RIGHT_KNEE], lm[POSE_LANDMARKS.RIGHT_ANKLE]);
-      const avgKnee = (leftKnee + rightKnee) / 2;
+    const prev = smoothedLandmarksRef.current;
+    const result: Point3D[] = new Array(raw.length);
 
-      if (avgKnee < 110 && repStateRef.current === 'up') {
-        repStateRef.current = 'down';
-      } else if (avgKnee > 150 && repStateRef.current === 'down') {
-        repsRef.current += 1;
-        repStateRef.current = 'up';
-      }
-    } else if (exType === 'lunge') {
-      const knee = calculateAngle(lm[POSE_LANDMARKS.LEFT_HIP], lm[POSE_LANDMARKS.LEFT_KNEE], lm[POSE_LANDMARKS.LEFT_ANKLE]);
-      if (knee < 105 && repStateRef.current === 'up') {
-        repStateRef.current = 'down';
-      } else if (knee > 155 && repStateRef.current === 'down') {
-        repsRef.current += 1;
-        repStateRef.current = 'up';
-      }
-    } else if (exType === 'jumping_jack') {
-      const leftArm = calculateAngle(lm[POSE_LANDMARKS.LEFT_HIP], lm[POSE_LANDMARKS.LEFT_SHOULDER], lm[POSE_LANDMARKS.LEFT_WRIST]);
-      const rightArm = calculateAngle(lm[POSE_LANDMARKS.RIGHT_HIP], lm[POSE_LANDMARKS.RIGHT_SHOULDER], lm[POSE_LANDMARKS.RIGHT_WRIST]);
-      const avgArm = (leftArm + rightArm) / 2;
+    for (let i = 0; i < raw.length; i++) {
+      const r = raw[i];
+      const p = prev[i];
 
-      if (avgArm > 140 && repStateRef.current === 'down') {
-        repsRef.current += 1;
-        repStateRef.current = 'up';
-      } else if (avgArm < 70 && repStateRef.current === 'up') {
-        repStateRef.current = 'down';
+      const dx = r.x - p.x;
+      const dy = r.y - p.y;
+      const velocity = Math.sqrt(dx * dx + dy * dy);
+
+      // Dynamic smoothing factor: faster movement = higher responsiveness
+      let alpha = 0.55;
+      if (velocity > 0.04) {
+        alpha = 0.85; // fast motion: track immediately
+      } else if (velocity < 0.008) {
+        alpha = 0.28; // still: maximum noise suppression
       }
-    } else if (exType === 'crunch') {
-      const crunchAngle = calculateAngle(lm[POSE_LANDMARKS.LEFT_SHOULDER], lm[POSE_LANDMARKS.LEFT_HIP], lm[POSE_LANDMARKS.LEFT_KNEE]);
-      if (crunchAngle < 95 && repStateRef.current === 'up') {
-        repStateRef.current = 'down';
-      } else if (crunchAngle > 130 && repStateRef.current === 'down') {
-        repsRef.current += 1;
-        repStateRef.current = 'up';
-      }
-    } else if (exType === 'bicep_curl') {
-      const elbow = calculateAngle(lm[POSE_LANDMARKS.LEFT_SHOULDER], lm[POSE_LANDMARKS.LEFT_ELBOW], lm[POSE_LANDMARKS.LEFT_WRIST]);
-      if (elbow < 65 && repStateRef.current === 'up') {
-        repStateRef.current = 'down';
-      } else if (elbow > 135 && repStateRef.current === 'down') {
-        repsRef.current += 1;
-        repStateRef.current = 'up';
-      }
-    } else if (exType === 'overhead_press' || exType === 'standing_stretch') {
-      const arm = calculateAngle(lm[POSE_LANDMARKS.LEFT_HIP], lm[POSE_LANDMARKS.LEFT_SHOULDER], lm[POSE_LANDMARKS.LEFT_WRIST]);
-      if (arm > 150 && repStateRef.current === 'down') {
-        repsRef.current += 1;
-        repStateRef.current = 'up';
-      } else if (arm < 85 && repStateRef.current === 'up') {
-        repStateRef.current = 'down';
-      }
-    } else if (exType === 'bench_press') {
-      const elbow = calculateAngle(lm[POSE_LANDMARKS.LEFT_SHOULDER], lm[POSE_LANDMARKS.LEFT_ELBOW], lm[POSE_LANDMARKS.LEFT_WRIST]);
-      if (elbow < 85 && repStateRef.current === 'up') {
-        repStateRef.current = 'down';
-      } else if (elbow > 150 && repStateRef.current === 'down') {
-        repsRef.current += 1;
-        repStateRef.current = 'up';
-      }
-    } else if (exType === 'deadlift') {
-      const knee = calculateAngle(lm[POSE_LANDMARKS.LEFT_HIP], lm[POSE_LANDMARKS.LEFT_KNEE], lm[POSE_LANDMARKS.LEFT_ANKLE]);
-      if (knee < 120 && repStateRef.current === 'up') {
-        repStateRef.current = 'down';
-      } else if (knee > 160 && repStateRef.current === 'down') {
-        repsRef.current += 1;
-        repStateRef.current = 'up';
-      }
-    } else if (exType === 'pull_up') {
-      const elbow = calculateAngle(lm[POSE_LANDMARKS.LEFT_SHOULDER], lm[POSE_LANDMARKS.LEFT_ELBOW], lm[POSE_LANDMARKS.LEFT_WRIST]);
-      if (elbow < 80 && repStateRef.current === 'down') {
-        repsRef.current += 1;
-        repStateRef.current = 'up';
-      } else if (elbow > 150 && repStateRef.current === 'up') {
-        repStateRef.current = 'down';
-      }
-    } else if (exType === 'leg_raise') {
-      const hip = calculateAngle(lm[POSE_LANDMARKS.LEFT_SHOULDER], lm[POSE_LANDMARKS.LEFT_HIP], lm[POSE_LANDMARKS.LEFT_ANKLE]);
-      if (hip < 100 && repStateRef.current === 'up') {
-        repStateRef.current = 'down';
-      } else if (hip > 160 && repStateRef.current === 'down') {
-        repsRef.current += 1;
-        repStateRef.current = 'up';
-      }
-    } else if (exType === 'push_up') {
-      const leftElbow = calculateAngle(lm[POSE_LANDMARKS.LEFT_SHOULDER], lm[POSE_LANDMARKS.LEFT_ELBOW], lm[POSE_LANDMARKS.LEFT_WRIST]);
-      const rightElbow = calculateAngle(lm[POSE_LANDMARKS.RIGHT_SHOULDER], lm[POSE_LANDMARKS.RIGHT_ELBOW], lm[POSE_LANDMARKS.RIGHT_WRIST]);
-      const avgElbow = (leftElbow + rightElbow) / 2;
-      const spineLean = calculateSpineLean(lm);
-      
-      // Only count if horizontal (not standing)
-      if (spineLean > 50) {
-        if (avgElbow < 85 && repStateRef.current === 'up') {
-          repStateRef.current = 'down';
-        } else if (avgElbow > 150 && repStateRef.current === 'down') {
-          repsRef.current += 1;
+
+      const smoothedX = p.x + alpha * dx;
+      const smoothedY = p.y + alpha * dy;
+      const smoothedZ = (p.z ?? 0) + alpha * ((r.z ?? 0) - (p.z ?? 0));
+
+      result[i] = {
+        x: smoothedX,
+        y: smoothedY,
+        z: smoothedZ,
+        visibility: r.visibility,
+      };
+    }
+
+    smoothedLandmarksRef.current = result;
+    return result;
+  }, []);
+
+  /**
+   * Robust Repetition Detector with Schmitt-Trigger Hysteresis & False Positive Guard
+   */
+  const checkRepetition = useCallback(
+    (lm: Point3D[], exType: ExerciseType) => {
+      if (!lm || lm.length === 0) return;
+
+      const previousReps = repsRef.current;
+      const now = performance.now();
+
+      // Enforce minimum cycle time of 600ms between completed reps to prevent double counts
+      const timeSinceLastRep = now - lastRepTimeRef.current;
+
+      if (exType === 'squat') {
+        const knee = getBilateralAngle(
+          lm,
+          [POSE_LANDMARKS.LEFT_HIP, POSE_LANDMARKS.LEFT_KNEE, POSE_LANDMARKS.LEFT_ANKLE],
+          [POSE_LANDMARKS.RIGHT_HIP, POSE_LANDMARKS.RIGHT_KNEE, POSE_LANDMARKS.RIGHT_ANKLE]
+        ).angle;
+
+        if (knee <= 105) {
+          inflectionDwellRef.current += 1;
+          if (inflectionDwellRef.current >= 2 && repStateRef.current === 'up') {
+            repStateRef.current = 'down';
+          }
+        } else if (knee >= 155) {
+          if (repStateRef.current === 'down' && timeSinceLastRep > 600) {
+            repsRef.current += 1;
+            lastRepTimeRef.current = now;
+            repStateRef.current = 'up';
+            inflectionDwellRef.current = 0;
+          }
+        }
+      } else if (exType === 'push_up') {
+        const spineLean = calculateSpineLean(lm);
+        if (spineLean > 45) {
+          const elbow = getBilateralAngle(
+            lm,
+            [POSE_LANDMARKS.LEFT_SHOULDER, POSE_LANDMARKS.LEFT_ELBOW, POSE_LANDMARKS.LEFT_WRIST],
+            [POSE_LANDMARKS.RIGHT_SHOULDER, POSE_LANDMARKS.RIGHT_ELBOW, POSE_LANDMARKS.RIGHT_WRIST]
+          ).angle;
+
+          if (elbow <= 90) {
+            inflectionDwellRef.current += 1;
+            if (inflectionDwellRef.current >= 2 && repStateRef.current === 'up') {
+              repStateRef.current = 'down';
+            }
+          } else if (elbow >= 150) {
+            if (repStateRef.current === 'down' && timeSinceLastRep > 600) {
+              repsRef.current += 1;
+              lastRepTimeRef.current = now;
+              repStateRef.current = 'up';
+              inflectionDwellRef.current = 0;
+            }
+          }
+        } else {
           repStateRef.current = 'up';
+          inflectionDwellRef.current = 0;
+        }
+      } else if (exType === 'bicep_curl') {
+        const elbow = getBilateralAngle(
+          lm,
+          [POSE_LANDMARKS.LEFT_SHOULDER, POSE_LANDMARKS.LEFT_ELBOW, POSE_LANDMARKS.LEFT_WRIST],
+          [POSE_LANDMARKS.RIGHT_SHOULDER, POSE_LANDMARKS.RIGHT_ELBOW, POSE_LANDMARKS.RIGHT_WRIST]
+        ).angle;
+
+        if (elbow <= 65) {
+          inflectionDwellRef.current += 1;
+          if (inflectionDwellRef.current >= 2 && repStateRef.current === 'up') {
+            repStateRef.current = 'down';
+          }
+        } else if (elbow >= 140) {
+          if (repStateRef.current === 'down' && timeSinceLastRep > 600) {
+            repsRef.current += 1;
+            lastRepTimeRef.current = now;
+            repStateRef.current = 'up';
+            inflectionDwellRef.current = 0;
+          }
+        }
+      } else if (exType === 'overhead_press' || exType === 'standing_stretch') {
+        const arm = getBilateralAngle(
+          lm,
+          [POSE_LANDMARKS.LEFT_HIP, POSE_LANDMARKS.LEFT_SHOULDER, POSE_LANDMARKS.LEFT_WRIST],
+          [POSE_LANDMARKS.RIGHT_HIP, POSE_LANDMARKS.RIGHT_SHOULDER, POSE_LANDMARKS.RIGHT_WRIST]
+        ).angle;
+
+        if (arm >= 150) {
+          if (repStateRef.current === 'down' && timeSinceLastRep > 600) {
+            repsRef.current += 1;
+            lastRepTimeRef.current = now;
+            repStateRef.current = 'up';
+          }
+        } else if (arm <= 85) {
+          repStateRef.current = 'down';
+        }
+      } else if (exType === 'lunge') {
+        const knee = calculateAngle(lm[POSE_LANDMARKS.LEFT_HIP], lm[POSE_LANDMARKS.LEFT_KNEE], lm[POSE_LANDMARKS.LEFT_ANKLE]);
+        if (knee <= 95) {
+          inflectionDwellRef.current += 1;
+          if (inflectionDwellRef.current >= 2 && repStateRef.current === 'up') {
+            repStateRef.current = 'down';
+          }
+        } else if (knee >= 155) {
+          if (repStateRef.current === 'down' && timeSinceLastRep > 650) {
+            repsRef.current += 1;
+            lastRepTimeRef.current = now;
+            repStateRef.current = 'up';
+            inflectionDwellRef.current = 0;
+          }
+        }
+      } else if (exType === 'jumping_jack') {
+        const arm = getBilateralAngle(
+          lm,
+          [POSE_LANDMARKS.LEFT_HIP, POSE_LANDMARKS.LEFT_SHOULDER, POSE_LANDMARKS.LEFT_WRIST],
+          [POSE_LANDMARKS.RIGHT_HIP, POSE_LANDMARKS.RIGHT_SHOULDER, POSE_LANDMARKS.RIGHT_WRIST]
+        ).angle;
+
+        if (arm >= 135) {
+          if (repStateRef.current === 'down' && timeSinceLastRep > 450) {
+            repsRef.current += 1;
+            lastRepTimeRef.current = now;
+            repStateRef.current = 'up';
+          }
+        } else if (arm <= 55) {
+          repStateRef.current = 'down';
+        }
+      } else if (exType === 'crunch') {
+        const crunch = calculateAngle(lm[POSE_LANDMARKS.LEFT_SHOULDER], lm[POSE_LANDMARKS.LEFT_HIP], lm[POSE_LANDMARKS.LEFT_KNEE]);
+        if (crunch <= 95) {
+          if (repStateRef.current === 'up') repStateRef.current = 'down';
+        } else if (crunch >= 130) {
+          if (repStateRef.current === 'down' && timeSinceLastRep > 600) {
+            repsRef.current += 1;
+            lastRepTimeRef.current = now;
+            repStateRef.current = 'up';
+          }
+        }
+      } else if (exType === 'bench_press') {
+        const elbow = getBilateralAngle(
+          lm,
+          [POSE_LANDMARKS.LEFT_SHOULDER, POSE_LANDMARKS.LEFT_ELBOW, POSE_LANDMARKS.LEFT_WRIST],
+          [POSE_LANDMARKS.RIGHT_SHOULDER, POSE_LANDMARKS.RIGHT_ELBOW, POSE_LANDMARKS.RIGHT_WRIST]
+        ).angle;
+
+        if (elbow <= 85) {
+          if (repStateRef.current === 'up') repStateRef.current = 'down';
+        } else if (elbow >= 150) {
+          if (repStateRef.current === 'down' && timeSinceLastRep > 600) {
+            repsRef.current += 1;
+            lastRepTimeRef.current = now;
+            repStateRef.current = 'up';
+          }
+        }
+      } else if (exType === 'deadlift') {
+        const knee = getBilateralAngle(
+          lm,
+          [POSE_LANDMARKS.LEFT_HIP, POSE_LANDMARKS.LEFT_KNEE, POSE_LANDMARKS.LEFT_ANKLE],
+          [POSE_LANDMARKS.RIGHT_HIP, POSE_LANDMARKS.RIGHT_KNEE, POSE_LANDMARKS.RIGHT_ANKLE]
+        ).angle;
+
+        if (knee <= 115) {
+          if (repStateRef.current === 'up') repStateRef.current = 'down';
+        } else if (knee >= 160) {
+          if (repStateRef.current === 'down' && timeSinceLastRep > 700) {
+            repsRef.current += 1;
+            lastRepTimeRef.current = now;
+            repStateRef.current = 'up';
+          }
+        }
+      } else if (exType === 'pull_up') {
+        const elbow = getBilateralAngle(
+          lm,
+          [POSE_LANDMARKS.LEFT_SHOULDER, POSE_LANDMARKS.LEFT_ELBOW, POSE_LANDMARKS.LEFT_WRIST],
+          [POSE_LANDMARKS.RIGHT_SHOULDER, POSE_LANDMARKS.RIGHT_ELBOW, POSE_LANDMARKS.RIGHT_WRIST]
+        ).angle;
+
+        if (elbow <= 80) {
+          if (repStateRef.current === 'down') {
+            repsRef.current += 1;
+            lastRepTimeRef.current = now;
+            repStateRef.current = 'up';
+          }
+        } else if (elbow >= 150) {
+          repStateRef.current = 'down';
+        }
+      } else if (exType === 'side_arm_raise') {
+        const arm = getBilateralAngle(
+          lm,
+          [POSE_LANDMARKS.LEFT_HIP, POSE_LANDMARKS.LEFT_SHOULDER, POSE_LANDMARKS.LEFT_WRIST],
+          [POSE_LANDMARKS.RIGHT_HIP, POSE_LANDMARKS.RIGHT_SHOULDER, POSE_LANDMARKS.RIGHT_WRIST]
+        ).angle;
+
+        if (arm >= 75) {
+          if (repStateRef.current === 'down' && timeSinceLastRep > 600) {
+            repsRef.current += 1;
+            lastRepTimeRef.current = now;
+            repStateRef.current = 'up';
+          }
+        } else if (arm <= 35) {
+          repStateRef.current = 'down';
+        }
+      } else if (exType === 'calf_raise') {
+        const ankleY = lm[POSE_LANDMARKS.LEFT_ANKLE]?.y ?? 0;
+        const toeY = lm[POSE_LANDMARKS.LEFT_FOOT_INDEX]?.y ?? 0;
+        if (ankleY < toeY - 0.015 && repStateRef.current === 'up') {
+          repStateRef.current = 'down';
+        } else if (ankleY >= toeY && repStateRef.current === 'down') {
+          if (timeSinceLastRep > 600) {
+            repsRef.current += 1;
+            lastRepTimeRef.current = now;
+            repStateRef.current = 'up';
+          }
+        }
+      } else if (exType === 'punches') {
+        const leftElbow = calculateAngle(lm[POSE_LANDMARKS.LEFT_SHOULDER], lm[POSE_LANDMARKS.LEFT_ELBOW], lm[POSE_LANDMARKS.LEFT_WRIST]);
+        const rightElbow = calculateAngle(lm[POSE_LANDMARKS.RIGHT_SHOULDER], lm[POSE_LANDMARKS.RIGHT_ELBOW], lm[POSE_LANDMARKS.RIGHT_WRIST]);
+
+        if (leftElbow > 148 || rightElbow > 148) {
+          if (repStateRef.current === 'down' && timeSinceLastRep > 350) {
+            repsRef.current += 1;
+            lastRepTimeRef.current = now;
+            repStateRef.current = 'up';
+          }
+        } else if (leftElbow < 115 && rightElbow < 115) {
+          repStateRef.current = 'down';
+        }
+      } else if (exType === 'arm_circles') {
+        // Continuous isometric movement: 1 rep awarded every 30 good frames (~1 second)
+        if (goodFramesRef.current > 0 && goodFramesRef.current % 30 === 0) {
+          repsRef.current += 1;
         }
       } else {
-        // Prevent accidental rep counts when standing by resetting state
-        repStateRef.current = 'up';
-      }
-    } else if (exType === 'calf_raise') {
-      const ankleY = lm[POSE_LANDMARKS.LEFT_ANKLE].y;
-      const toeY = lm[POSE_LANDMARKS.LEFT_FOOT_INDEX].y;
-      if (ankleY < toeY && repStateRef.current === 'up') {
-        repStateRef.current = 'down';
-      } else if (ankleY >= toeY && repStateRef.current === 'down') {
-        repsRef.current += 1;
-        repStateRef.current = 'up';
-      }
-    } else if (exType === 'side_arm_raise') {
-      const leftArm = calculateAngle(lm[POSE_LANDMARKS.LEFT_HIP], lm[POSE_LANDMARKS.LEFT_SHOULDER], lm[POSE_LANDMARKS.LEFT_WRIST]);
-      const rightArm = calculateAngle(lm[POSE_LANDMARKS.RIGHT_HIP], lm[POSE_LANDMARKS.RIGHT_SHOULDER], lm[POSE_LANDMARKS.RIGHT_WRIST]);
-      const avgArm = (leftArm + rightArm) / 2;
-      
-      if (avgArm > 75 && repStateRef.current === 'down') {
-        repsRef.current += 1;
-        repStateRef.current = 'up';
-      } else if (avgArm < 35 && repStateRef.current === 'up') {
-        repStateRef.current = 'down';
-      }
-    } else if (exType === 'punches') {
-      const leftElbow = calculateAngle(lm[POSE_LANDMARKS.LEFT_SHOULDER], lm[POSE_LANDMARKS.LEFT_ELBOW], lm[POSE_LANDMARKS.LEFT_WRIST]);
-      const rightElbow = calculateAngle(lm[POSE_LANDMARKS.RIGHT_SHOULDER], lm[POSE_LANDMARKS.RIGHT_ELBOW], lm[POSE_LANDMARKS.RIGHT_WRIST]);
-      
-      if (leftElbow > 145 || rightElbow > 145) {
-        if (repStateRef.current === 'down') {
+        // General isometric posture hold: 1 rep awarded every 120 good frames (~4 seconds)
+        if (goodFramesRef.current > 0 && goodFramesRef.current % 120 === 0) {
           repsRef.current += 1;
-          repStateRef.current = 'up';
         }
-      } else if (leftElbow < 120 && rightElbow < 120) {
-        repStateRef.current = 'down';
       }
-    } else if (exType === 'arm_circles') {
-      // 1 rep credit for every 1 second of keeping arms extended and moving
-      if (goodFramesRef.current > 0 && goodFramesRef.current % 30 === 0) {
-        repsRef.current += 1;
-      }
-    } else {
-      // General hold posture: Every 4 seconds of good form gives +1 rep credit
-      if (goodFramesRef.current > 0 && goodFramesRef.current % 120 === 0) {
-        repsRef.current += 1;
-      }
-    }
 
-    if (repsRef.current > previousReps) {
-       speak(repsRef.current.toString());
-    }
-  }, [speak]);
+      if (repsRef.current > previousReps) {
+        speak(repsRef.current.toString(), true);
+      }
+    },
+    [speak]
+  );
 
-  // Initialize PoseLandmarker
+  // Initialize PoseLandmarker with resilient fallback (GPU -> CPU)
   const initPoseLandmarker = useCallback(async () => {
     if (poseLandmarkerRef.current) return;
     setIsLoading(true);
@@ -288,18 +429,34 @@ export function usePoseDetection({ exercise, enabled }: UsePoseDetectionOptions)
       const vision = await FilesetResolver.forVisionTasks(
         'https://cdn.jsdelivr.net/npm/@mediapipe/tasks-vision@latest/wasm'
       );
-      poseLandmarkerRef.current = await PoseLandmarker.createFromOptions(vision, {
-        baseOptions: {
-          modelAssetPath:
-            'https://storage.googleapis.com/mediapipe-models/pose_landmarker/pose_landmarker_full/float16/1/pose_landmarker_full.task',
-          delegate: 'GPU',
-        },
-        runningMode: 'VIDEO',
-        numPoses: 1,
-      });
+
+      let landmarker: PoseLandmarker;
+      try {
+        landmarker = await PoseLandmarker.createFromOptions(vision, {
+          baseOptions: {
+            modelAssetPath:
+              'https://storage.googleapis.com/mediapipe-models/pose_landmarker/pose_landmarker_full/float16/1/pose_landmarker_full.task',
+            delegate: 'GPU',
+          },
+          runningMode: 'VIDEO',
+          numPoses: 1,
+        });
+      } catch {
+        // Fallback to CPU delegate if WebGL/GPU is not supported
+        landmarker = await PoseLandmarker.createFromOptions(vision, {
+          baseOptions: {
+            modelAssetPath:
+              'https://storage.googleapis.com/mediapipe-models/pose_landmarker/pose_landmarker_full/float16/1/pose_landmarker_full.task',
+            delegate: 'CPU',
+          },
+          runningMode: 'VIDEO',
+          numPoses: 1,
+        });
+      }
+      poseLandmarkerRef.current = landmarker;
     } catch (e) {
       console.error('Failed to load PoseLandmarker:', e);
-      setError('Failed to load AI model. Check your connection.');
+      setError('Failed to load AI model. Please check your internet connection.');
     } finally {
       setIsLoading(false);
     }
@@ -316,7 +473,7 @@ export function usePoseDetection({ exercise, enabled }: UsePoseDetectionOptions)
         videoRef.current.onloadeddata = () => setIsCameraReady(true);
       }
     } catch {
-      setError('Camera access denied. Please allow camera permission.');
+      setError('Camera access denied. Please allow camera permissions in your browser.');
     }
   }, []);
 
@@ -351,21 +508,25 @@ export function usePoseDetection({ exercise, enabled }: UsePoseDetectionOptions)
       // --- Draw Target "Ghost" Skeleton ---
       try {
         const targetData = getExerciseKeyframes(exercise);
-        const targetFrame = targetData.keyframes[repStateRef.current === 'down' ? 1 : 0] || targetData.keyframes[0];
-        
+        const targetFrame =
+          targetData.keyframes[repStateRef.current === 'down' ? 1 : 0] || targetData.keyframes[0];
+
         // Find user bounding box for scaling
-        let minX = 1, maxX = 0, minY = 1, maxY = 0;
+        let minX = 1,
+          maxX = 0,
+          minY = 1,
+          maxY = 0;
         for (const lm of detectedLandmarks) {
-          if ((lm.visibility ?? 0) > 0.5) {
+          if ((lm.visibility ?? 0) > 0.45) {
             if (lm.x < minX) minX = lm.x;
             if (lm.x > maxX) maxX = lm.x;
             if (lm.y < minY) minY = lm.y;
             if (lm.y > maxY) maxY = lm.y;
           }
         }
-        
-        const scaleX = (maxX - minX) || 1;
-        const scaleY = (maxY - minY) || 1;
+
+        const scaleX = maxX - minX || 1;
+        const scaleY = maxY - minY || 1;
         const offsetX = minX;
         const offsetY = minY;
 
@@ -374,34 +535,43 @@ export function usePoseDetection({ exercise, enabled }: UsePoseDetectionOptions)
           const pt = targetFrame[jointName];
           return {
             x: ((pt.x / 100) * scaleX + offsetX) * canvas.width,
-            y: ((pt.y / 100) * scaleY + offsetY) * canvas.height
+            y: ((pt.y / 100) * scaleY + offsetY) * canvas.height,
           };
         };
 
         const GHOST_CONNECTIONS: [keyof JointPositions, keyof JointPositions][] = [
-          ['head', 'lShoulder'], ['head', 'rShoulder'], ['lShoulder', 'rShoulder'],
-          ['lShoulder', 'lElbow'], ['lElbow', 'lWrist'], ['rShoulder', 'rElbow'], ['rElbow', 'rWrist'],
-          ['lShoulder', 'lHip'], ['rShoulder', 'rHip'], ['lHip', 'rHip'],
-          ['lHip', 'lKnee'], ['lKnee', 'lAnkle'], ['rHip', 'rKnee'], ['rKnee', 'rAnkle'],
+          ['head', 'lShoulder'],
+          ['head', 'rShoulder'],
+          ['lShoulder', 'rShoulder'],
+          ['lShoulder', 'lElbow'],
+          ['lElbow', 'lWrist'],
+          ['rShoulder', 'rElbow'],
+          ['rElbow', 'rWrist'],
+          ['lShoulder', 'lHip'],
+          ['rShoulder', 'rHip'],
+          ['lHip', 'rHip'],
+          ['lHip', 'lKnee'],
+          ['lKnee', 'lAnkle'],
+          ['rHip', 'rKnee'],
+          ['rKnee', 'rAnkle'],
         ];
 
         // Draw Ghost Connections
-        ctx.globalAlpha = 0.3;
+        ctx.globalAlpha = 0.25;
         for (const [startIdx, endIdx] of GHOST_CONNECTIONS) {
           const start = getGhostPoint(startIdx);
           const end = getGhostPoint(endIdx);
           ctx.beginPath();
           ctx.moveTo(start.x, start.y);
           ctx.lineTo(end.x, end.y);
-          ctx.strokeStyle = '#fff';
-          ctx.lineWidth = 4;
+          ctx.strokeStyle = '#ffffff';
+          ctx.lineWidth = 3.5;
           ctx.lineCap = 'round';
           ctx.stroke();
         }
         ctx.globalAlpha = 1.0;
-        
-      } catch (e) {
-        // Fallback if ghost logic fails
+      } catch {
+        // Fallback if ghost keyframe is absent
       }
 
       // --- Draw Real User Skeleton ---
@@ -409,38 +579,38 @@ export function usePoseDetection({ exercise, enabled }: UsePoseDetectionOptions)
         const start = detectedLandmarks[startIdx];
         const end = detectedLandmarks[endIdx];
         if (!start || !end) continue;
-        if ((start.visibility ?? 0) < 0.5 || (end.visibility ?? 0) < 0.5) continue;
+        if ((start.visibility ?? 0) < 0.45 || (end.visibility ?? 0) < 0.45) continue;
 
         ctx.beginPath();
         ctx.moveTo(start.x * canvas.width, start.y * canvas.height);
         ctx.lineTo(end.x * canvas.width, end.y * canvas.height);
         ctx.strokeStyle = color;
-        ctx.lineWidth = 3;
+        ctx.lineWidth = 3.5;
         ctx.lineCap = 'round';
         ctx.stroke();
       }
 
-      // Draw landmarks with error coloring
-      const metricMap = new Map(result.metrics.map(m => [m.label.toLowerCase(), m.good]));
-      
+      // Draw Landmarks with error coloring
+      const metricMap = new Map(result.metrics.map((m) => [m.label.toLowerCase(), m.good]));
+
       for (let i = 0; i < detectedLandmarks.length; i++) {
         const lm = detectedLandmarks[i];
-        if ((lm.visibility ?? 0) < 0.5) continue;
-        
+        if ((lm.visibility ?? 0) < 0.45) continue;
+
         let jointColor = color;
-        // Simple heuristic to color specific joints based on metrics
         if (i === POSE_LANDMARKS.LEFT_KNEE || i === POSE_LANDMARKS.RIGHT_KNEE) {
-          if (metricMap.has('left knee') && !metricMap.get('left knee')) jointColor = '#f87171';
+          if (metricMap.has('knee angle') && !metricMap.get('knee angle')) jointColor = '#f87171';
         } else if (i === POSE_LANDMARKS.LEFT_HIP || i === POSE_LANDMARKS.RIGHT_HIP) {
-           if (metricMap.has('left hip') && !metricMap.get('left hip')) jointColor = '#f87171';
+          if (metricMap.has('spine lean') && !metricMap.get('spine lean')) jointColor = '#f87171';
         }
-        
+
         ctx.beginPath();
-        ctx.arc(lm.x * canvas.width, lm.y * canvas.height, 5, 0, 2 * Math.PI);
-        ctx.fillStyle = jointColor === '#f87171' ? 'rgba(248,113,113,0.2)' : bgColor;
+        ctx.arc(lm.x * canvas.width, lm.y * canvas.height, 5.5, 0, 2 * Math.PI);
+        ctx.fillStyle = jointColor === '#f87171' ? 'rgba(248,113,113,0.3)' : bgColor;
         ctx.fill();
+
         ctx.beginPath();
-        ctx.arc(lm.x * canvas.width, lm.y * canvas.height, 3, 0, 2 * Math.PI);
+        ctx.arc(lm.x * canvas.width, lm.y * canvas.height, 3.5, 0, 2 * Math.PI);
         ctx.fillStyle = jointColor;
         ctx.fill();
       }
@@ -449,18 +619,18 @@ export function usePoseDetection({ exercise, enabled }: UsePoseDetectionOptions)
   );
 
   // Detection loop
-  const detectPose = useCallback(() => {
+  const detectPose = useCallback(function loop() {
     const video = videoRef.current;
     const poseLandmarker = poseLandmarkerRef.current;
     if (!video || !poseLandmarker || video.readyState < 2) {
-      animFrameRef.current = requestAnimationFrame(detectPose);
+      animFrameRef.current = requestAnimationFrame(loop);
       return;
     }
 
     const now = performance.now();
-    // Throttle to ~30 FPS for smoothness & efficiency
+    // Throttle to ~30 FPS for mobile thermal efficiency
     if (now - lastTimestampRef.current < 33) {
-      animFrameRef.current = requestAnimationFrame(detectPose);
+      animFrameRef.current = requestAnimationFrame(loop);
       return;
     }
     lastTimestampRef.current = now;
@@ -468,7 +638,10 @@ export function usePoseDetection({ exercise, enabled }: UsePoseDetectionOptions)
     try {
       const result = poseLandmarker.detectForVideo(video, now);
       if (result.landmarks && result.landmarks.length > 0) {
-        const lm = result.landmarks[0] as Point3D[];
+        const rawLm = result.landmarks[0] as Point3D[];
+        // Apply temporal smoothing to eliminate frame jitter
+        const lm = smoothLandmarks(rawLm);
+
         setLandmarks(result.landmarks as Point3D[][]);
         drawSkeleton(lm);
 
@@ -482,13 +655,13 @@ export function usePoseDetection({ exercise, enabled }: UsePoseDetectionOptions)
         checkRepetition(lm, exercise);
 
         if (!res.isCorrect && res.feedback) {
-          // Add some context for the speech to make it sound natural
-          speak(res.feedback);
+          speak(res.feedback, false);
         }
 
-        const postureScore = totalFramesRef.current > 0
-          ? Math.round((goodFramesRef.current / totalFramesRef.current) * 100)
-          : 100;
+        const postureScore =
+          totalFramesRef.current > 0
+            ? Math.round((goodFramesRef.current / totalFramesRef.current) * 100)
+            : 100;
 
         setStats((prev) => ({
           ...prev,
@@ -496,12 +669,12 @@ export function usePoseDetection({ exercise, enabled }: UsePoseDetectionOptions)
           postureScore,
         }));
       }
-    } catch (e) {
-      // Ignore timestamp non-monotonicity
+    } catch {
+      // Ignore transient timestamp non-monotonicity
     }
 
-    animFrameRef.current = requestAnimationFrame(detectPose);
-  }, [exercise, drawSkeleton, checkRepetition]);
+    animFrameRef.current = requestAnimationFrame(loop);
+  }, [exercise, drawSkeleton, smoothLandmarks, checkRepetition, speak]);
 
   // Lifecycle: start/stop based on `enabled`
   useEffect(() => {
@@ -516,7 +689,9 @@ export function usePoseDetection({ exercise, enabled }: UsePoseDetectionOptions)
       setPostureResult(null);
       setLandmarks(null);
       const ctx = canvasRef.current?.getContext('2d');
-      if (ctx && canvasRef.current) ctx.clearRect(0, 0, canvasRef.current.width, canvasRef.current.height);
+      if (ctx && canvasRef.current) {
+        ctx.clearRect(0, 0, canvasRef.current.width, canvasRef.current.height);
+      }
     }
 
     return () => {

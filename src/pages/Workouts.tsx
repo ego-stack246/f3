@@ -3,13 +3,14 @@ import { Play, Clock, Flame, Filter, Camera, Repeat, Dumbbell, Wrench, Sparkles,
 import { cn } from '../lib/utils';
 import ExerciseDetailModal from '../components/ExerciseDetailModal';
 import type { WorkoutDetail } from '../components/ExerciseDetailModal';
+import type { ExerciseType } from '../lib/poseAnalysis';
 import exercisesData from '../data/exercises-library.json';
 
 
-const capitalize = (s) => s.split(' ').map(w => w.charAt(0).toUpperCase() + w.slice(1)).join(' ');
+const capitalize = (s: string) => s.split(' ').map((w: string) => w.charAt(0).toUpperCase() + w.slice(1)).join(' ');
 
-const mapCategory = (bodyPart) => {
-  const map = {
+const mapCategory = (bodyPart: string) => {
+  const map: Record<string, string> = {
     'waist': 'Core',
     'chest': 'Chest',
     'back': 'Back',
@@ -24,7 +25,7 @@ const mapCategory = (bodyPart) => {
   return map[bodyPart.toLowerCase()] || 'Other';
 };
 
-const EXTRA_WORKOUTS = exercisesData.map((ex, i) => ({
+const EXTRA_WORKOUTS: WorkoutDetail[] = exercisesData.map((ex, i) => ({
   id: 1000 + i,
   title: capitalize(ex.name),
   category: mapCategory(ex.bodyPart),
@@ -35,7 +36,7 @@ const EXTRA_WORKOUTS = exercisesData.map((ex, i) => ({
   cals: 80,
   equipment: capitalize(ex.equipment),
   image: ex.gifUrl,
-  exercise: 'push_up',
+  exercise: 'push_up' as ExerciseType,
   musclesWorked: [capitalize(ex.target)],
   instructions: ex.instructions,
   mistakes: []

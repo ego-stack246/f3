@@ -18,10 +18,8 @@ export async function apiFetch(endpoint: string, options: RequestInit = {}) {
   });
 
   if (response.status === 401) {
-    // Basic unauth handling (in a real app, attempt refresh token first)
+    // Stale or invalid token: clean up without triggering an intrusive redirect loop
     localStorage.removeItem('fitsync_token');
-    localStorage.removeItem('fitsynch_user');
-    window.location.href = '/login';
   }
 
   if (!response.ok) {

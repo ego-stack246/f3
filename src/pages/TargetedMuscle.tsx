@@ -1,13 +1,37 @@
 import { useState } from 'react';
 import Model from 'react-body-highlighter';
-import { Play, ChevronRight, Activity, Filter, Info } from 'lucide-react';
+import { Play, Activity, Filter, Info } from 'lucide-react';
 import exercisesData from '../data/exercises-library.json';
 
 const equipments = ['Bodyweight', 'Dumbbell', 'Barbell', 'Cables', 'Machine'];
 
+const popularMuscles = [
+  { id: 'trapezius', label: 'Trapezius (Traps)' },
+  { id: 'chest', label: 'Chest' },
+  { id: 'upper-back', label: 'Upper Back / Lats' },
+  { id: 'front-deltoids', label: 'Shoulders' },
+  { id: 'biceps', label: 'Biceps' },
+  { id: 'triceps', label: 'Triceps' },
+  { id: 'abs', label: 'Abs / Core' },
+  { id: 'gluteal', label: 'Glutes' },
+  { id: 'quadriceps', label: 'Quadriceps' },
+  { id: 'hamstring', label: 'Hamstrings' },
+  { id: 'calves', label: 'Calves' },
+];
+
+const formatMuscleName = (muscle: string) => {
+  const m = muscle.toLowerCase();
+  if (m === 'trapezius' || m.includes('trap')) return 'Trapezius (Traps)';
+  if (m === 'upper-back') return 'Upper Back / Lats';
+  if (m === 'lower-back') return 'Lower Back';
+  if (m.includes('deltoid')) return 'Shoulders (Deltoids)';
+  if (m === 'gluteal') return 'Glutes';
+  return muscle.replace('-', ' ');
+};
+
 export default function TargetedMuscle() {
-  const [selectedMuscle, setSelectedMuscle] = useState<string | null>(null);
-  const [selectedEquipment, setSelectedEquipment] = useState<string>('Bodyweight');
+  const [selectedMuscle, setSelectedMuscle] = useState<string | null>('trapezius');
+  const [selectedEquipment, setSelectedEquipment] = useState<string>('Dumbbell');
 
   // Handle muscle click
   const handleClick = (e: any) => {
@@ -18,58 +42,13 @@ export default function TargetedMuscle() {
     ? [{ name: 'Selected', muscles: [selectedMuscle] }]
     : [];
 
-  const getMuscleImage = (muscle: string, index: number) => {
-    const images: Record<string, string[]> = {
-      'chest': [
-        "https://images.unsplash.com/photo-1571019614242-c5c5dee9f50b?auto=format&fit=crop&w=400&q=80",
-        "https://images.unsplash.com/photo-1534438327276-14e5300c3a48?auto=format&fit=crop&w=400&q=80"
-      ],
-      'back': [
-        "https://images.unsplash.com/photo-1581009146145-b5ef050c2e1e?auto=format&fit=crop&w=400&q=80",
-        "https://images.unsplash.com/photo-1603287681836-b174ce5074c2?auto=format&fit=crop&w=400&q=80"
-      ],
-      'legs': [
-        "https://images.unsplash.com/photo-1434596922112-19c563067271?auto=format&fit=crop&w=400&q=80",
-        "https://images.unsplash.com/photo-1574680096145-d05b474e2155?auto=format&fit=crop&w=400&q=80"
-      ],
-      'arms': [
-        "https://images.unsplash.com/photo-1581009137042-c552e485697a?auto=format&fit=crop&w=400&q=80",
-        "https://images.unsplash.com/photo-1583454110551-21f2fa2afe61?auto=format&fit=crop&w=400&q=80"
-      ],
-      'shoulders': [
-        "https://images.unsplash.com/photo-1534438327276-14e5300c3a48?auto=format&fit=crop&w=400&q=80",
-        "https://images.unsplash.com/photo-1571019614242-c5c5dee9f50b?auto=format&fit=crop&w=400&q=80"
-      ],
-      'abs': [
-        "https://images.unsplash.com/photo-1571019613454-1cb2f99b2d8b?auto=format&fit=crop&w=400&q=80",
-        "https://images.unsplash.com/photo-1517836357463-d25dfeac3438?auto=format&fit=crop&w=400&q=80"
-      ]
-    };
-
-    // Find the category that matches or use a default
-    const category = Object.keys(images).find(key => muscle.toLowerCase().includes(key)) || 'abs';
-    // Fallback if category not found (abs used as default above, but let's be safe)
-    const categoryImages = images[category] || images['abs'];
-    
-    return categoryImages[index % categoryImages.length];
-  };
-
-  const getAction = (m: string) => {
-    const l = m.toLowerCase();
-    if (['chest', 'shoulders'].some(k => l.includes(k))) return 'Press';
-    if (['back', 'lats'].some(k => l.includes(k))) return 'Row';
-    if (['legs', 'glutes', 'quads', 'hamstrings'].some(k => l.includes(k))) return 'Squat';
-    if (['arms', 'biceps', 'triceps'].some(k => l.includes(k))) return 'Curl';
-    return 'Exercise';
-  };
-
   const getExercises = (muscle: string, eq: string) => {
     const mappedEq = eq.toLowerCase().replace('bodyweight', 'body weight').replace('cables', 'cable');
     
     const filtered = exercisesData.filter((ex: any) => {
       // Equipment Match
       const eqMatch = eq === 'Machine' 
-        ? ex.equipment.includes('machine') 
+        ? (ex.equipment.includes('machine') || ex.equipment.includes('leverage')) 
         : ex.equipment === mappedEq;
         
       // Muscle Match
@@ -77,6 +56,11 @@ export default function TargetedMuscle() {
       let mMatch = ex.target.includes(m) || ex.bodyPart.includes(m) || ex.category.includes(m);
       
       // Handle react-body-highlighter specific names vs API names
+      if (m === 'trapezius' || m.includes('trap')) {
+        const name = ex.name.toLowerCase();
+        const target = ex.target.toLowerCase();
+        mMatch = target === 'traps' || target.includes('trap') || name.includes('shrug') || name.includes('upright row') || name.includes('scapular') || name.includes('scapula');
+      }
       if (m === 'quadriceps') mMatch = ex.target === 'quads' || ex.bodyPart === 'upper legs';
       if (m === 'hamstring') mMatch = ex.target === 'hamstrings' || ex.bodyPart === 'upper legs';
       if (m === 'gluteal') mMatch = ex.target === 'glutes';
@@ -85,6 +69,7 @@ export default function TargetedMuscle() {
       if (m.includes('deltoids')) mMatch = ex.bodyPart === 'shoulders' || ex.target === 'delts';
       if (m === 'calves') mMatch = ex.target === 'calves' || ex.bodyPart === 'lower legs';
       if (m === 'forearm') mMatch = ex.target.includes('forearm') || ex.bodyPart === 'lower arms';
+      if (m === 'neck') mMatch = ex.bodyPart === 'neck' || ex.target === 'traps' || ex.name.toLowerCase().includes('shrug');
       
       return eqMatch && mMatch;
     });
@@ -94,17 +79,23 @@ export default function TargetedMuscle() {
       return exercisesData.filter((ex: any) => {
         const m = muscle.toLowerCase();
         let mMatch = ex.target.includes(m) || ex.bodyPart.includes(m) || ex.category.includes(m);
+        if (m === 'trapezius' || m.includes('trap')) {
+          const name = ex.name.toLowerCase();
+          const target = ex.target.toLowerCase();
+          mMatch = target === 'traps' || target.includes('trap') || name.includes('shrug') || name.includes('upright row') || name.includes('scapular') || name.includes('scapula');
+        }
         if (m === 'quadriceps') mMatch = ex.target === 'quads' || ex.bodyPart === 'upper legs';
         if (m === 'hamstring') mMatch = ex.target === 'hamstrings' || ex.bodyPart === 'upper legs';
         if (m === 'gluteal') mMatch = ex.target === 'glutes';
         if (m === 'abs' || m === 'obliques') mMatch = ex.target === 'abs' || ex.bodyPart === 'waist';
         if (m.includes('back')) mMatch = ex.bodyPart === 'back';
         if (m.includes('deltoids')) mMatch = ex.bodyPart === 'shoulders';
+        if (m === 'neck') mMatch = ex.bodyPart === 'neck' || ex.target === 'traps';
         return mMatch;
-      }).slice(0, 4);
+      }).slice(0, 6);
     }
 
-    return filtered.slice(0, 4);
+    return filtered.slice(0, 6);
   };
 
   return (
@@ -149,8 +140,29 @@ export default function TargetedMuscle() {
           </div>
 
           <div className="mt-8 flex items-center gap-2 text-xs text-earth-800/60 bg-cream-50 px-4 py-2 rounded-xl">
-            <Info className="w-4 h-4 text-sage-600" />
-            <p>Tap any highlighted muscle group to begin.</p>
+            <Info className="w-4 h-4 text-sage-600 shrink-0" />
+            <p>Tap any highlighted muscle on the model or pick from the targets below.</p>
+          </div>
+
+          <div className="w-full mt-6 pt-5 border-t border-earth-100">
+            <p className="text-xs font-bold text-earth-800/70 uppercase tracking-wider mb-3 text-center">
+              Targeted Muscles
+            </p>
+            <div className="flex flex-wrap gap-2 justify-center">
+              {popularMuscles.map(m => (
+                <button
+                  key={m.id}
+                  onClick={() => setSelectedMuscle(m.id)}
+                  className={`px-3 py-1.5 rounded-xl text-xs font-semibold transition-all duration-200 ${
+                    selectedMuscle === m.id
+                      ? 'bg-sage-600 text-white shadow-md shadow-sage-200 scale-105'
+                      : 'bg-white text-earth-800 hover:bg-sage-50 hover:text-sage-700 border border-earth-200/70'
+                  }`}
+                >
+                  {m.label}
+                </button>
+              ))}
+            </div>
           </div>
         </div>
 
@@ -186,7 +198,7 @@ export default function TargetedMuscle() {
               <div className="flex items-center justify-between">
                 <h3 className="text-2xl font-black text-earth-900 capitalize flex items-center gap-3">
                   <Activity className="w-6 h-6 text-sage-600" />
-                  {selectedMuscle.replace('-', ' ')} Exercises
+                  {formatMuscleName(selectedMuscle)} Exercises
                 </h3>
                 <span className="text-sm font-bold text-sage-700 bg-sage-100 px-3 py-1 rounded-full">
                   {selectedEquipment}

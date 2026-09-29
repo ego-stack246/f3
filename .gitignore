@@ -29,8 +29,10 @@ dist-ssr
 backend/venv/
 backend/__pycache__/
 backend/**/*.pyc
-backend/*.db
+*.db
+scratch/
 
 # Data
 temp_dataset/
+
 

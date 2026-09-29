@@ -1,10 +1,10 @@
-from pydantic import BaseModel, EmailStr, ConfigDict
+from pydantic import BaseModel, ConfigDict
 from typing import Optional, List
 from datetime import datetime
 from uuid import UUID
 
 class UserBase(BaseModel):
-    email: EmailStr
+    email: str
     name: str
     age: Optional[int] = None
     sex: Optional[str] = None

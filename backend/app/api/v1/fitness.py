@@ -50,3 +50,25 @@ async def create_session(
     await db.commit()
     await db.refresh(db_session)
     return db_session
+
+from app.schemas.leaderboard import WorkoutCompleteRequest, WorkoutCompleteResponse
+from app.services.leaderboard_service import LeaderboardService
+
+@router.post("/sessions/complete", response_model=WorkoutCompleteResponse)
+@router.post("/workouts/complete", response_model=WorkoutCompleteResponse)
+@router.post("/fitness/sessions/complete", response_model=WorkoutCompleteResponse)
+@router.post("/fitness/workouts/complete", response_model=WorkoutCompleteResponse)
+async def complete_workout(
+    data: WorkoutCompleteRequest,
+    current_user: User = Depends(get_current_user),
+    db: AsyncSession = Depends(get_db),
+):
+    """
+    Submits a completed workout with AI posture metrics, computes performance points server-side,
+    updates user streaks, and updates leaderboard scores transactionally.
+    """
+    return await LeaderboardService.record_workout_completion(
+        db=db,
+        user=current_user,
+        data=data,
+    )

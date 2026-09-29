@@ -1,4 +1,4 @@
-from pydantic_settings import BaseSettings
+from pydantic_settings import BaseSettings, SettingsConfigDict
 
 class Settings(BaseSettings):
     PROJECT_NAME: str = "FitSync AI"
@@ -10,7 +10,6 @@ class Settings(BaseSettings):
     GEMINI_API_KEY: str = "dummy_key"
     CORS_ORIGINS: list[str] = ["*"]
 
-    class Config:
-        env_file = ".env"
+    model_config = SettingsConfigDict(env_file=".env", extra="ignore")
 
 settings = Settings()

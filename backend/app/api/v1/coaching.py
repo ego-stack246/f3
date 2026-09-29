@@ -1,7 +1,7 @@
 from fastapi import APIRouter, Depends, HTTPException, status
 from sqlalchemy.ext.asyncio import AsyncSession
 from sqlalchemy.future import select
-from datetime import date
+from datetime import date, datetime
 from app.db.session import get_db
 from app.db.models.models import DailyCheckin, Plan
 from app.db.models.user import User
@@ -34,9 +34,16 @@ async def generate_plan(
         result = await db.execute(select(DailyCheckin).where(DailyCheckin.id == request.checkin_id))
         checkin = result.scalars().first()
     else:
+        today_start = datetime.combine(date.today(), datetime.min.time())
+        today_end = datetime.combine(date.today(), datetime.max.time())
         result = await db.execute(
             select(DailyCheckin)
-            .where(DailyCheckin.user_id == current_user.id, DailyCheckin.date == date.today())
+            .where(
+                DailyCheckin.user_id == current_user.id,
+                DailyCheckin.date >= today_start,
+                DailyCheckin.date <= today_end
+            )
+            .order_by(DailyCheckin.date.desc())
         )
         checkin = result.scalars().first()
         
@@ -52,8 +59,16 @@ async def get_todays_plan(
     current_user: User = Depends(get_current_user),
     db: AsyncSession = Depends(get_db)
 ):
+    today_start = datetime.combine(date.today(), datetime.min.time())
+    today_end = datetime.combine(date.today(), datetime.max.time())
     result = await db.execute(
-        select(Plan).where(Plan.user_id == current_user.id, Plan.date == date.today())
+        select(Plan)
+        .where(
+            Plan.user_id == current_user.id,
+            Plan.date >= today_start,
+            Plan.date <= today_end
+        )
+        .order_by(Plan.date.desc())
     )
     plan = result.scalars().first()
     if not plan:

@@ -63,7 +63,7 @@ async def generate_adaptive_plan(user: User, checkin: DailyCheckin, db: AsyncSes
     db_plan = Plan(
         user_id=user.id,
         checkin_id=checkin.id,
-        date=datetime.date.today(),
+        date=datetime.datetime.utcnow(),
         intensity_level=plan_json["intensity_level"],
         rationale=plan_json["rationale"],
         plan_json=plan_json,

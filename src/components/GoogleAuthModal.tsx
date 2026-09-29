@@ -83,19 +83,19 @@ export default function GoogleAuthModal({ isOpen, onClose, onSuccess }: GoogleAu
 
   const PRESET_ACCOUNTS = [
     {
-      name: 'Google Account on Computer',
-      email: 'my.computer.google@gmail.com',
+      name: 'Alex Rivera',
+      email: 'alex@fitsync.ai',
       avatar: 'https://images.unsplash.com/photo-1535713875002-d1d0cf377fde?q=80&w=200&auto=format&fit=crop',
     },
     {
       name: 'Sarah Jenkins',
-      email: 'sarah.jenkins@gmail.com',
-      avatar: 'https://images.unsplash.com/photo-1438761681033-6461ffad8d80?q=80&w=200&auto=format&fit=crop',
+      email: 'demo@fitsync.ai',
+      avatar: 'https://images.unsplash.com/photo-1494790108377-be9c29b29330?q=80&w=200&auto=format&fit=crop',
     },
     {
-      name: 'Michael Chen',
-      email: 'michael.chen@gmail.com',
-      avatar: 'https://images.unsplash.com/photo-1500648767791-00dcc994a43e?q=80&w=200&auto=format&fit=crop',
+      name: 'Marcus Chen',
+      email: 'marcus@fitsync.ai',
+      avatar: 'https://images.unsplash.com/photo-1507003211169-0a1dd7228f2d?q=80&w=200&auto=format&fit=crop',
     },
   ];
 
@@ -293,7 +293,7 @@ export default function GoogleAuthModal({ isOpen, onClose, onSuccess }: GoogleAu
 
         {/* Footer */}
         <div className="p-4 bg-slate-50 border-t border-slate-100 text-center text-[11px] text-slate-500">
-          Connected securely via FitSynchAI Google Authentication Protocol.
+          Connected securely via FitSync AI Google Authentication Protocol.
         </div>
       </div>
     </div>

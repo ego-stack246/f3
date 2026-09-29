@@ -13,6 +13,11 @@ class LoginRequest(BaseModel):
     email: str
     password: str
 
+class GoogleAuthRequest(BaseModel):
+    email: str
+    name: str | None = None
+    avatar: str | None = None
+
 class AuthResponse(BaseModel):
     access_token: str
     refresh_token: str

@@ -7,8 +7,8 @@ class ExerciseBase(BaseModel):
     name: str
     muscle_group: str
     level: str
-    equipment: List[str] = []
-    instructions: List[str] = []
+    equipment: Optional[List[str]] = []
+    instructions: Optional[List[str]] = []
     video_key: Optional[str] = None
     supports_pose_coach: bool = False
     target_angles: Optional[dict[str, Any]] = None

@@ -60,36 +60,14 @@ export const POSE_CONNECTIONS: [number, number][] = [
 export interface Point3D {
   x: number;
   y: number;
-  z: number;
+  z?: number;
   visibility?: number;
 }
 
-/**
- * Calculates the angle (in degrees) formed at point B by lines BA and BC.
- */
-export function calculateAngle(a: Point3D, b: Point3D, c: Point3D): number {
-  const radians =
-    Math.atan2(c.y - b.y, c.x - b.x) - Math.atan2(a.y - b.y, a.x - b.x);
-  let angle = Math.abs((radians * 180) / Math.PI);
-  if (angle > 180) angle = 360 - angle;
-  return Math.round(angle);
-}
-
-/**
- * Calculates the forward lean angle of the spine relative to vertical.
- * Uses shoulder midpoint and hip midpoint.
- */
-export function calculateSpineLean(landmarks: Point3D[]): number {
-  const midShoulderX = (landmarks[POSE_LANDMARKS.LEFT_SHOULDER].x + landmarks[POSE_LANDMARKS.RIGHT_SHOULDER].x) / 2;
-  const midShoulderY = (landmarks[POSE_LANDMARKS.LEFT_SHOULDER].y + landmarks[POSE_LANDMARKS.RIGHT_SHOULDER].y) / 2;
-  const midHipX = (landmarks[POSE_LANDMARKS.LEFT_HIP].x + landmarks[POSE_LANDMARKS.RIGHT_HIP].x) / 2;
-  const midHipY = (landmarks[POSE_LANDMARKS.LEFT_HIP].y + landmarks[POSE_LANDMARKS.RIGHT_HIP].y) / 2;
-
-  // Angle from vertical — 0° = perfectly upright
-  const dx = midShoulderX - midHipX;
-  const dy = midHipY - midShoulderY; // positive when shoulder is above hip
-  const angleFromVertical = Math.abs(Math.atan2(dx, dy) * (180 / Math.PI));
-  return Math.round(angleFromVertical);
+export interface PostureResult {
+  isCorrect: boolean;
+  feedback: string;
+  metrics: { label: string; value: string; good: boolean }[];
 }
 
 export type ExerciseType =
@@ -118,43 +96,114 @@ export type ExerciseType =
   | 'arm_circles'
   | 'punches';
 
-export interface PostureResult {
-  isCorrect: boolean;
-  feedback: string;
-  metrics: { label: string; value: string; good: boolean }[];
+/**
+ * Calculates high-precision angle (in degrees) formed at point B by lines BA and BC
+ * with numerical stability clamping to prevent NaN errors.
+ */
+export function calculateAngle(a: Point3D, b: Point3D, c: Point3D): number {
+  if (!a || !b || !c) return 0;
+  const baX = a.x - b.x;
+  const baY = a.y - b.y;
+  const bcX = c.x - b.x;
+  const bcY = c.y - b.y;
+
+  const dot = baX * bcX + baY * bcY;
+  const magBA = Math.sqrt(baX * baX + baY * baY);
+  const magBC = Math.sqrt(bcX * bcX + bcY * bcY);
+  if (magBA * magBC === 0) return 0;
+
+  const cosAngle = Math.max(-1, Math.min(1, dot / (magBA * magBC)));
+  return Math.round((Math.acos(cosAngle) * 180) / Math.PI);
 }
 
 /**
- * Analyze landmarks for a specific exercise and return posture feedback.
+ * Adaptive Bilateral Joint Angle Calculator:
+ * Dynamically identifies which side is more visible / facing the camera,
+ * or computes a confidence-weighted average if both limbs are in clear view.
+ */
+export function getBilateralAngle(
+  lm: Point3D[],
+  leftIndices: [number, number, number],
+  rightIndices: [number, number, number]
+): { angle: number; side: 'left' | 'right' | 'both'; confidence: number } {
+  const [la, lb, lc] = leftIndices;
+  const [ra, rb, rc] = rightIndices;
+
+  const pLA = lm[la], pLB = lm[lb], pLC = lm[lc];
+  const pRA = lm[ra], pRB = lm[rb], pRC = lm[rc];
+
+  if (!pLA || !pLB || !pLC || !pRA || !pRB || !pRC) {
+    return { angle: 0, side: 'both', confidence: 0 };
+  }
+
+  const leftVis = ((pLA.visibility ?? 0.5) + (pLB.visibility ?? 0.5) + (pLC.visibility ?? 0.5)) / 3;
+  const rightVis = ((pRA.visibility ?? 0.5) + (pRB.visibility ?? 0.5) + (pRC.visibility ?? 0.5)) / 3;
+
+  const leftAngle = calculateAngle(pLA, pLB, pLC);
+  const rightAngle = calculateAngle(pRA, pRB, pRC);
+
+  // When user is in profile / 3/4 angle
+  if (leftVis > 0.6 && rightVis < 0.35) {
+    return { angle: leftAngle, side: 'left', confidence: leftVis };
+  }
+  if (rightVis > 0.6 && leftVis < 0.35) {
+    return { angle: rightAngle, side: 'right', confidence: rightVis };
+  }
+
+  // Both limbs in view: confidence-weighted average
+  const totalVis = leftVis + rightVis;
+  if (totalVis < 0.1) {
+    return { angle: Math.round((leftAngle + rightAngle) / 2), side: 'both', confidence: 0.1 };
+  }
+  const weighted = Math.round((leftAngle * leftVis + rightAngle * rightVis) / totalVis);
+  return { angle: weighted, side: 'both', confidence: Math.max(leftVis, rightVis) };
+}
+
+/**
+ * Calculates the forward lean angle of the spine relative to vertical (0° = upright).
+ * Uses midpoint of shoulders and hips for robust torso vector orientation.
+ */
+export function calculateSpineLean(landmarks: Point3D[]): number {
+  if (!landmarks || landmarks.length < 25) return 0;
+  const ls = landmarks[POSE_LANDMARKS.LEFT_SHOULDER];
+  const rs = landmarks[POSE_LANDMARKS.RIGHT_SHOULDER];
+  const lh = landmarks[POSE_LANDMARKS.LEFT_HIP];
+  const rh = landmarks[POSE_LANDMARKS.RIGHT_HIP];
+
+  if (!ls || !rs || !lh || !rh) return 0;
+
+  const midShoulderX = (ls.x + rs.x) / 2;
+  const midShoulderY = (ls.y + rs.y) / 2;
+  const midHipX = (lh.x + rh.x) / 2;
+  const midHipY = (lh.y + rh.y) / 2;
+
+  const dx = midShoulderX - midHipX;
+  const dy = midHipY - midShoulderY; // positive when shoulder is above hip
+  const angleFromVertical = Math.abs(Math.atan2(dx, dy) * (180 / Math.PI));
+  return Math.round(angleFromVertical);
+}
+
+/**
+ * Main entry point: Analyze landmarks for an exercise and return posture accuracy feedback.
  */
 export function analyzePosture(landmarks: Point3D[], exercise: ExerciseType): PostureResult {
+  if (!landmarks || landmarks.length < 25) {
+    return {
+      isCorrect: true,
+      feedback: 'Detecting body position…',
+      metrics: [{ label: 'Pose', value: 'Tracking', good: true }],
+    };
+  }
+
   switch (exercise) {
     case 'squat':
       return analyzeSquat(landmarks);
-    case 'lunge':
-      return analyzeLunge(landmarks);
+    case 'push_up':
+      return analyzePushUp(landmarks);
     case 'plank':
       return analyzePlank(landmarks);
-    case 'tree_pose':
-      return analyzeTreePose(landmarks);
-    case 'warrior_pose':
-      return analyzeWarriorPose(landmarks);
-    case 'jumping_jack':
-      return analyzeJumpingJack(landmarks);
-    case 'mountain_climber':
-      return analyzeMountainClimber(landmarks);
-    case 'crunch':
-      return analyzeCrunch(landmarks);
-    case 'russian_twist':
-      return analyzeRussianTwist(landmarks);
-    case 'leg_raise':
-      return analyzeLegRaise(landmarks);
-    case 'heel_touch':
-      return analyzeHeelTouch(landmarks);
-    case 'spine_twist':
-      return analyzeSpineTwist(landmarks);
-    case 'standing_stretch':
-      return analyzeStandingStretch(landmarks);
+    case 'lunge':
+      return analyzeLunge(landmarks);
     case 'bicep_curl':
       return analyzeBicepCurl(landmarks);
     case 'overhead_press':
@@ -167,14 +216,32 @@ export function analyzePosture(landmarks: Point3D[], exercise: ExerciseType): Po
       return analyzePullUp(landmarks);
     case 'calf_raise':
       return analyzeCalfRaise(landmarks);
-    case 'push_up':
-      return analyzePushUp(landmarks);
+    case 'jumping_jack':
+      return analyzeJumpingJack(landmarks);
+    case 'mountain_climber':
+      return analyzeMountainClimber(landmarks);
+    case 'crunch':
+      return analyzeCrunch(landmarks);
+    case 'russian_twist':
+      return analyzeRussianTwist(landmarks);
+    case 'leg_raise':
+      return analyzeLegRaise(landmarks);
+    case 'heel_touch':
+      return analyzeHeelTouch(landmarks);
     case 'side_arm_raise':
       return analyzeSideArmRaise(landmarks);
     case 'arm_circles':
       return analyzeArmCircles(landmarks);
     case 'punches':
       return analyzePunches(landmarks);
+    case 'tree_pose':
+      return analyzeTreePose(landmarks);
+    case 'warrior_pose':
+      return analyzeWarriorPose(landmarks);
+    case 'spine_twist':
+      return analyzeSpineTwist(landmarks);
+    case 'standing_stretch':
+      return analyzeStandingStretch(landmarks);
     case 'general_posture':
     default:
       return analyzeGeneralPosture(landmarks);
@@ -183,51 +250,126 @@ export function analyzePosture(landmarks: Point3D[], exercise: ExerciseType): Po
 
 function analyzeGeneralPosture(lm: Point3D[]): PostureResult {
   const spineLean = calculateSpineLean(lm);
-  const shoulderAngle = calculateAngle(
+  const leftShoulderAngle = calculateAngle(
     lm[POSE_LANDMARKS.LEFT_HIP],
     lm[POSE_LANDMARKS.LEFT_SHOULDER],
     lm[POSE_LANDMARKS.LEFT_EAR]
   );
-  const isSpineOk = spineLean < 12;
-  const isShoulderOk = shoulderAngle > 150;
+  const isSpineOk = spineLean < 14;
+  const isShoulderOk = leftShoulderAngle > 145;
   const isCorrect = isSpineOk && isShoulderOk;
 
   return {
     isCorrect,
     feedback: isCorrect
-      ? 'Great posture! Spine aligned, shoulders relaxed.'
+      ? 'Great posture! Spine aligned, chest open.'
       : !isSpineOk
-      ? 'Sit up straighter — you\'re leaning forward too much.'
-      : 'Roll your shoulders back and keep your head above your spine.',
+      ? 'Sit up straighter — keep your torso aligned.'
+      : 'Roll your shoulders back and keep head neutral.',
     metrics: [
       { label: 'Spine Lean', value: `${spineLean}°`, good: isSpineOk },
-      { label: 'Shoulder Alignment', value: `${shoulderAngle}°`, good: isShoulderOk },
+      { label: 'Neck Alignment', value: `${leftShoulderAngle}°`, good: isShoulderOk },
     ],
   };
 }
 
 function analyzeSquat(lm: Point3D[]): PostureResult {
-  const leftKneeAngle = calculateAngle(lm[POSE_LANDMARKS.LEFT_HIP], lm[POSE_LANDMARKS.LEFT_KNEE], lm[POSE_LANDMARKS.LEFT_ANKLE]);
-  const rightKneeAngle = calculateAngle(lm[POSE_LANDMARKS.RIGHT_HIP], lm[POSE_LANDMARKS.RIGHT_KNEE], lm[POSE_LANDMARKS.RIGHT_ANKLE]);
-  const avgKnee = Math.round((leftKneeAngle + rightKneeAngle) / 2);
+  const kneeData = getBilateralAngle(
+    lm,
+    [POSE_LANDMARKS.LEFT_HIP, POSE_LANDMARKS.LEFT_KNEE, POSE_LANDMARKS.LEFT_ANKLE],
+    [POSE_LANDMARKS.RIGHT_HIP, POSE_LANDMARKS.RIGHT_KNEE, POSE_LANDMARKS.RIGHT_ANKLE]
+  );
   const spineLean = calculateSpineLean(lm);
+  const kneeAngle = kneeData.angle;
 
-  const isKneeGood = avgKnee >= 70 && avgKnee <= 120;
-  const isSpineGood = spineLean < 30;
-  const isCorrect = isKneeGood && isSpineGood;
+  const isStanding = kneeAngle > 145;
+  const isDepthGood = kneeAngle >= 70 && kneeAngle <= 115;
+  const isSpineSafe = spineLean < 35;
+
+  let isCorrect = true;
+  let feedback = 'Excellent squat depth! Knees tracking well.';
+
+  if (!isSpineSafe) {
+    isCorrect = false;
+    feedback = 'Keep your chest lifted — avoid excessive forward lean.';
+  } else if (!isStanding && !isDepthGood) {
+    if (kneeAngle > 115) {
+      isCorrect = false;
+      feedback = 'Squat lower — aim for parallel thighs at ~90°.';
+    } else {
+      isCorrect = false;
+      feedback = 'Control your depth — don\'t collapse past 70°.';
+    }
+  }
 
   return {
     isCorrect,
-    feedback: isCorrect
-      ? 'Excellent squat depth! Knees tracking well.'
-      : !isKneeGood
-      ? avgKnee > 120
-        ? 'Go deeper — bend your knees more for full range.'
-        : 'Don\'t go too deep — maintain control at 90°.'
-      : 'Keep your chest up and back straight.',
+    feedback,
     metrics: [
-      { label: 'Knee Angle', value: `${avgKnee}°`, good: isKneeGood },
-      { label: 'Spine Lean', value: `${spineLean}°`, good: isSpineGood },
+      { label: 'Knee Angle', value: `${kneeAngle}°`, good: isStanding || isDepthGood },
+      { label: 'Spine Lean', value: `${spineLean}°`, good: isSpineSafe },
+    ],
+  };
+}
+
+function analyzePushUp(lm: Point3D[]): PostureResult {
+  const spineLean = calculateSpineLean(lm);
+  const isHorizontal = spineLean > 45;
+
+  const hipData = getBilateralAngle(
+    lm,
+    [POSE_LANDMARKS.LEFT_SHOULDER, POSE_LANDMARKS.LEFT_HIP, POSE_LANDMARKS.LEFT_ANKLE],
+    [POSE_LANDMARKS.RIGHT_SHOULDER, POSE_LANDMARKS.RIGHT_HIP, POSE_LANDMARKS.RIGHT_ANKLE]
+  );
+  const elbowData = getBilateralAngle(
+    lm,
+    [POSE_LANDMARKS.LEFT_SHOULDER, POSE_LANDMARKS.LEFT_ELBOW, POSE_LANDMARKS.LEFT_WRIST],
+    [POSE_LANDMARKS.RIGHT_SHOULDER, POSE_LANDMARKS.RIGHT_ELBOW, POSE_LANDMARKS.RIGHT_WRIST]
+  );
+
+  const isCoreStraight = hipData.angle >= 155 && hipData.angle <= 185;
+  const isCorrect = isHorizontal && isCoreStraight;
+
+  let feedback = 'Strong push-up plank! Keep core braced.';
+  if (!isHorizontal) {
+    feedback = 'Get into a horizontal plank on the floor.';
+  } else if (hipData.angle < 155) {
+    feedback = 'Don\'t let hips sag — engage glutes and abs.';
+  } else if (hipData.angle > 185) {
+    feedback = 'Lower hips to maintain a straight plank line.';
+  }
+
+  return {
+    isCorrect,
+    feedback,
+    metrics: [
+      { label: 'Body Line', value: `${hipData.angle}°`, good: isCoreStraight },
+      { label: 'Elbow Bend', value: `${elbowData.angle}°`, good: true },
+    ],
+  };
+}
+
+function analyzePlank(lm: Point3D[]): PostureResult {
+  const hipData = getBilateralAngle(
+    lm,
+    [POSE_LANDMARKS.LEFT_SHOULDER, POSE_LANDMARKS.LEFT_HIP, POSE_LANDMARKS.LEFT_ANKLE],
+    [POSE_LANDMARKS.RIGHT_SHOULDER, POSE_LANDMARKS.RIGHT_HIP, POSE_LANDMARKS.RIGHT_ANKLE]
+  );
+  const hipAngle = hipData.angle;
+  const isGood = hipAngle >= 158 && hipAngle <= 182;
+
+  let feedback = 'Solid plank! Core braced, neutral spine.';
+  if (hipAngle < 158) {
+    feedback = 'Hips are sagging — squeeze your glutes and core.';
+  } else if (hipAngle > 182) {
+    feedback = 'Lower your hips — avoid piking upward.';
+  }
+
+  return {
+    isCorrect: isGood,
+    feedback,
+    metrics: [
+      { label: 'Plank Line', value: `${hipAngle}°`, good: isGood },
     ],
   };
 }
@@ -235,474 +377,262 @@ function analyzeSquat(lm: Point3D[]): PostureResult {
 function analyzeLunge(lm: Point3D[]): PostureResult {
   const frontKnee = calculateAngle(lm[POSE_LANDMARKS.LEFT_HIP], lm[POSE_LANDMARKS.LEFT_KNEE], lm[POSE_LANDMARKS.LEFT_ANKLE]);
   const spineLean = calculateSpineLean(lm);
-  const isFrontKneeGood = frontKnee >= 80 && frontKnee <= 110;
-  const isSpineGood = spineLean < 15;
-  const isCorrect = isFrontKneeGood && isSpineGood;
+  const isKneeGood = frontKnee >= 80 && frontKnee <= 115;
+  const isSpineGood = spineLean < 20;
+  const isCorrect = isKneeGood && isSpineGood;
 
   return {
     isCorrect,
     feedback: isCorrect
-      ? 'Solid lunge form! Keep it stable.'
-      : !isFrontKneeGood
-      ? 'Adjust front knee to 90° — it\'s tracking too far.'
-      : 'Keep your torso upright during lunges.',
+      ? 'Great lunge stability! Front knee stacked at ~90°.'
+      : !isKneeGood
+      ? 'Aim for ~90° on the front knee — keep weight centered.'
+      : 'Keep your torso upright — don\'t lean over your knee.',
     metrics: [
-      { label: 'Front Knee', value: `${frontKnee}°`, good: isFrontKneeGood },
-      { label: 'Torso Lean', value: `${spineLean}°`, good: isSpineGood },
+      { label: 'Front Knee', value: `${frontKnee}°`, good: isKneeGood },
+      { label: 'Torso Lean', value: `${spineLean}°`, good: isSpineSafe(spineLean) },
     ],
   };
 }
 
-function analyzePlank(lm: Point3D[]): PostureResult {
-  const hipAngle = calculateAngle(lm[POSE_LANDMARKS.LEFT_SHOULDER], lm[POSE_LANDMARKS.LEFT_HIP], lm[POSE_LANDMARKS.LEFT_ANKLE]);
-  const isHipGood = hipAngle >= 160 && hipAngle <= 180;
-  const isCorrect = isHipGood;
-
-  return {
-    isCorrect,
-    feedback: isCorrect
-      ? 'Perfect plank! Body in a straight line.'
-      : hipAngle < 160
-      ? 'Hips are sagging — engage your core to lift.'
-      : 'Lower your hips slightly — don\'t pike up.',
-    metrics: [
-      { label: 'Body Alignment', value: `${hipAngle}°`, good: isHipGood },
-    ],
-  };
-}
-
-function analyzeTreePose(lm: Point3D[]): PostureResult {
-  const spineLean = calculateSpineLean(lm);
-  const shoulderLevel = Math.abs(lm[POSE_LANDMARKS.LEFT_SHOULDER].y - lm[POSE_LANDMARKS.RIGHT_SHOULDER].y);
-  const isBalanced = spineLean < 10;
-  const isShouldersLevel = shoulderLevel < 0.05;
-  const isCorrect = isBalanced && isShouldersLevel;
-
-  return {
-    isCorrect,
-    feedback: isCorrect
-      ? 'Beautiful tree pose! Great balance and alignment.'
-      : !isBalanced
-      ? 'Straighten your spine — find your center.'
-      : 'Level your shoulders — one is higher than the other.',
-    metrics: [
-      { label: 'Balance', value: `${spineLean}°`, good: isBalanced },
-      { label: 'Shoulder Level', value: isShouldersLevel ? 'Even' : 'Uneven', good: isShouldersLevel },
-    ],
-  };
-}
-
-function analyzeWarriorPose(lm: Point3D[]): PostureResult {
-  const frontKnee = calculateAngle(lm[POSE_LANDMARKS.LEFT_HIP], lm[POSE_LANDMARKS.LEFT_KNEE], lm[POSE_LANDMARKS.LEFT_ANKLE]);
-  const armAngle = calculateAngle(lm[POSE_LANDMARKS.LEFT_WRIST], lm[POSE_LANDMARKS.LEFT_SHOULDER], lm[POSE_LANDMARKS.LEFT_HIP]);
-  const isFrontKneeGood = frontKnee >= 80 && frontKnee <= 110;
-  const isArmGood = armAngle >= 160;
-  const isCorrect = isFrontKneeGood && isArmGood;
-
-  return {
-    isCorrect,
-    feedback: isCorrect
-      ? 'Strong warrior! Arms extended, knee stable.'
-      : !isFrontKneeGood
-      ? 'Bend your front knee to 90° over your ankle.'
-      : 'Extend your arms fully — reach through your fingertips.',
-    metrics: [
-      { label: 'Front Knee', value: `${frontKnee}°`, good: isFrontKneeGood },
-      { label: 'Arm Extension', value: `${armAngle}°`, good: isArmGood },
-    ],
-  };
-}
-
-// ========================= NEW EXERCISE ANALYZERS =========================
-
-function analyzeJumpingJack(lm: Point3D[]): PostureResult {
-  // Check arm spread: angle at shoulder between hip and wrist
-  const leftArmAngle = calculateAngle(lm[POSE_LANDMARKS.LEFT_HIP], lm[POSE_LANDMARKS.LEFT_SHOULDER], lm[POSE_LANDMARKS.LEFT_WRIST]);
-  const rightArmAngle = calculateAngle(lm[POSE_LANDMARKS.RIGHT_HIP], lm[POSE_LANDMARKS.RIGHT_SHOULDER], lm[POSE_LANDMARKS.RIGHT_WRIST]);
-  const avgArm = Math.round((leftArmAngle + rightArmAngle) / 2);
-  // Check leg spread: distance between ankles relative to hips
-  const legSpread = Math.abs(lm[POSE_LANDMARKS.LEFT_ANKLE].x - lm[POSE_LANDMARKS.RIGHT_ANKLE].x);
-  const hipWidth = Math.abs(lm[POSE_LANDMARKS.LEFT_HIP].x - lm[POSE_LANDMARKS.RIGHT_HIP].x);
-  const legRatio = legSpread / (hipWidth || 0.01);
-
-  const isArmsUp = avgArm >= 140;
-  const isLegsWide = legRatio > 1.8;
-  const isCorrect = isArmsUp && isLegsWide;
-
-  return {
-    isCorrect,
-    feedback: isCorrect
-      ? 'Great jumping jack! Full extension!'
-      : !isArmsUp
-      ? 'Raise your arms higher — full overhead reach!'
-      : 'Spread your legs wider for full range of motion.',
-    metrics: [
-      { label: 'Arm Angle', value: `${avgArm}°`, good: isArmsUp },
-      { label: 'Leg Spread', value: isLegsWide ? 'Wide' : 'Narrow', good: isLegsWide },
-    ],
-  };
-}
-
-function analyzeMountainClimber(lm: Point3D[]): PostureResult {
-  // Similar to plank — body should be straight, one knee driving forward
-  const hipAngle = calculateAngle(lm[POSE_LANDMARKS.LEFT_SHOULDER], lm[POSE_LANDMARKS.LEFT_HIP], lm[POSE_LANDMARKS.LEFT_ANKLE]);
-  const isBodyStraight = hipAngle >= 150 && hipAngle <= 180;
-  // Check if arms are straight (shoulder-elbow-wrist)
-  const armAngle = calculateAngle(lm[POSE_LANDMARKS.LEFT_SHOULDER], lm[POSE_LANDMARKS.LEFT_ELBOW], lm[POSE_LANDMARKS.LEFT_WRIST]);
-  const isArmsStraight = armAngle >= 160;
-  const isCorrect = isBodyStraight && isArmsStraight;
-
-  return {
-    isCorrect,
-    feedback: isCorrect
-      ? 'Strong mountain climber! Keep driving those knees.'
-      : !isBodyStraight
-      ? 'Keep your hips level — don\'t pike up or sag.'
-      : 'Lock your arms straight under your shoulders.',
-    metrics: [
-      { label: 'Hip Alignment', value: `${hipAngle}°`, good: isBodyStraight },
-      { label: 'Arm Lock', value: `${armAngle}°`, good: isArmsStraight },
-    ],
-  };
-}
-
-function analyzeCrunch(lm: Point3D[]): PostureResult {
-  // Measure torso curl: angle at hip between shoulder and knee
-  const crunchAngle = calculateAngle(lm[POSE_LANDMARKS.LEFT_SHOULDER], lm[POSE_LANDMARKS.LEFT_HIP], lm[POSE_LANDMARKS.LEFT_KNEE]);
-  const isCurled = crunchAngle >= 60 && crunchAngle <= 110;
-  // Check neck — ear should stay relatively aligned with shoulder (no neck strain)
-  const neckAngle = calculateAngle(lm[POSE_LANDMARKS.LEFT_EAR], lm[POSE_LANDMARKS.LEFT_SHOULDER], lm[POSE_LANDMARKS.LEFT_HIP]);
-  const isNeckOk = neckAngle >= 140;
-  const isCorrect = isCurled && isNeckOk;
-
-  return {
-    isCorrect,
-    feedback: isCorrect
-      ? 'Good crunch! Core engaged, neck neutral.'
-      : !isCurled
-      ? crunchAngle > 110
-        ? 'Curl up more — lift your shoulder blades off the ground.'
-        : 'Don\'t curl too far — keep tension on your abs.'
-      : 'Don\'t pull on your neck — keep your chin off your chest.',
-    metrics: [
-      { label: 'Crunch Angle', value: `${crunchAngle}°`, good: isCurled },
-      { label: 'Neck Position', value: isNeckOk ? 'Neutral' : 'Strained', good: isNeckOk },
-    ],
-  };
-}
-
-function analyzeRussianTwist(lm: Point3D[]): PostureResult {
-  // Lean back angle (shoulder-hip vertical)
-  const spineLean = calculateSpineLean(lm);
-  const isLeanBack = spineLean >= 20 && spineLean <= 50;
-  // Shoulder rotation (difference in z or x between shoulders)
-  const shoulderRotation = Math.abs(lm[POSE_LANDMARKS.LEFT_SHOULDER].x - lm[POSE_LANDMARKS.RIGHT_SHOULDER].x);
-  const hipRotation = Math.abs(lm[POSE_LANDMARKS.LEFT_HIP].x - lm[POSE_LANDMARKS.RIGHT_HIP].x);
-  const twistRatio = shoulderRotation / (hipRotation || 0.01);
-  const isTwisting = twistRatio > 1.3 || twistRatio < 0.7;
-  const isCorrect = isLeanBack && isTwisting;
-
-  return {
-    isCorrect,
-    feedback: isCorrect
-      ? 'Good russian twist! Great rotation and lean.'
-      : !isLeanBack
-      ? spineLean < 20
-        ? 'Lean back more — create a V-shape with your torso and thighs.'
-        : 'Don\'t lean back too far — maintain core control.'
-      : 'Rotate your shoulders more — twist side to side fully.',
-    metrics: [
-      { label: 'Lean Angle', value: `${spineLean}°`, good: isLeanBack },
-      { label: 'Twist', value: isTwisting ? 'Good' : 'More needed', good: isTwisting },
-    ],
-  };
-}
-
-function analyzeLegRaise(lm: Point3D[]): PostureResult {
-  // Leg angle relative to torso — hip angle between shoulder and ankle
-  const legAngle = calculateAngle(lm[POSE_LANDMARKS.LEFT_SHOULDER], lm[POSE_LANDMARKS.LEFT_HIP], lm[POSE_LANDMARKS.LEFT_ANKLE]);
-  const isLegUp = legAngle >= 70 && legAngle <= 110;
-  // Check if legs are straight (hip-knee-ankle)
-  const kneeStraight = calculateAngle(lm[POSE_LANDMARKS.LEFT_HIP], lm[POSE_LANDMARKS.LEFT_KNEE], lm[POSE_LANDMARKS.LEFT_ANKLE]);
-  const isKneeLocked = kneeStraight >= 160;
-  const isCorrect = isLegUp && isKneeLocked;
-
-  return {
-    isCorrect,
-    feedback: isCorrect
-      ? 'Perfect leg raise! Legs straight, core engaged.'
-      : !isLegUp
-      ? legAngle > 110
-        ? 'Raise your legs higher — aim for 90° to the floor.'
-        : 'Lower your legs slowly — don\'t swing.'
-      : 'Keep your legs straight — don\'t bend at the knees.',
-    metrics: [
-      { label: 'Leg Angle', value: `${legAngle}°`, good: isLegUp },
-      { label: 'Knee Lock', value: `${kneeStraight}°`, good: isKneeLocked },
-    ],
-  };
-}
-
-function analyzeHeelTouch(lm: Point3D[]): PostureResult {
-  // Similar to crunch — slight curl with lateral reach
-  const crunchAngle = calculateAngle(lm[POSE_LANDMARKS.LEFT_SHOULDER], lm[POSE_LANDMARKS.LEFT_HIP], lm[POSE_LANDMARKS.LEFT_KNEE]);
-  const isCurled = crunchAngle >= 50 && crunchAngle <= 100;
-  // Check lateral reach — hand near ankle
-  const handToAnkleDist = Math.abs(lm[POSE_LANDMARKS.LEFT_WRIST].y - lm[POSE_LANDMARKS.LEFT_ANKLE].y);
-  const isReaching = handToAnkleDist < 0.15;
-  const isCorrect = isCurled && isReaching;
-
-  return {
-    isCorrect,
-    feedback: isCorrect
-      ? 'Nice heel touches! Great oblique engagement.'
-      : !isCurled
-      ? 'Curl up slightly — lift your shoulders off the ground.'
-      : 'Reach further to the side — try to touch your heel.',
-    metrics: [
-      { label: 'Curl Angle', value: `${crunchAngle}°`, good: isCurled },
-      { label: 'Reach', value: isReaching ? 'Touching' : 'Reach more', good: isReaching },
-    ],
-  };
-}
-
-function analyzeSpineTwist(lm: Point3D[]): PostureResult {
-  // Seated or standing spinal twist — check shoulder rotation relative to hips
-  const spineLean = calculateSpineLean(lm);
-  const isSpineUpright = spineLean < 15;
-  const shoulderDiffX = lm[POSE_LANDMARKS.LEFT_SHOULDER].x - lm[POSE_LANDMARKS.RIGHT_SHOULDER].x;
-  const hipDiffX = lm[POSE_LANDMARKS.LEFT_HIP].x - lm[POSE_LANDMARKS.RIGHT_HIP].x;
-  const twistAmount = Math.abs(shoulderDiffX - hipDiffX);
-  const isTwisting = twistAmount > 0.04;
-  const isCorrect = isSpineUpright && isTwisting;
-
-  return {
-    isCorrect,
-    feedback: isCorrect
-      ? 'Beautiful spinal twist! Hold and breathe.'
-      : !isSpineUpright
-      ? 'Keep your spine tall — don\'t lean forward or back.'
-      : 'Rotate further — lead with your ribs, not your arms.',
-    metrics: [
-      { label: 'Spine', value: `${spineLean}°`, good: isSpineUpright },
-      { label: 'Rotation', value: isTwisting ? 'Good' : 'More needed', good: isTwisting },
-    ],
-  };
-}
-
-function analyzeStandingStretch(lm: Point3D[]): PostureResult {
-  // Arms overhead stretch — arm angle relative to torso
-  const leftArm = calculateAngle(lm[POSE_LANDMARKS.LEFT_HIP], lm[POSE_LANDMARKS.LEFT_SHOULDER], lm[POSE_LANDMARKS.LEFT_WRIST]);
-  const rightArm = calculateAngle(lm[POSE_LANDMARKS.RIGHT_HIP], lm[POSE_LANDMARKS.RIGHT_SHOULDER], lm[POSE_LANDMARKS.RIGHT_WRIST]);
-  const avgArm = Math.round((leftArm + rightArm) / 2);
-  const isArmsUp = avgArm >= 160;
-  const spineLean = calculateSpineLean(lm);
-  const isAligned = spineLean < 10;
-  const isCorrect = isArmsUp && isAligned;
-
-  return {
-    isCorrect,
-    feedback: isCorrect
-      ? 'Great stretch! Full extension, spine aligned.'
-      : !isArmsUp
-      ? 'Reach higher — extend your arms fully overhead.'
-      : 'Stand tall — keep your spine straight while stretching.',
-    metrics: [
-      { label: 'Arm Reach', value: `${avgArm}°`, good: isArmsUp },
-      { label: 'Spine', value: `${spineLean}°`, good: isAligned },
-    ],
-  };
+function isSpineSafe(lean: number): boolean {
+  return lean < 20;
 }
 
 function analyzeBicepCurl(lm: Point3D[]): PostureResult {
-  const leftElbow = calculateAngle(lm[POSE_LANDMARKS.LEFT_SHOULDER], lm[POSE_LANDMARKS.LEFT_ELBOW], lm[POSE_LANDMARKS.LEFT_WRIST]);
-  const rightElbow = calculateAngle(lm[POSE_LANDMARKS.RIGHT_SHOULDER], lm[POSE_LANDMARKS.RIGHT_ELBOW], lm[POSE_LANDMARKS.RIGHT_WRIST]);
-  const avgElbow = Math.round((leftElbow + rightElbow) / 2);
+  const elbowData = getBilateralAngle(
+    lm,
+    [POSE_LANDMARKS.LEFT_SHOULDER, POSE_LANDMARKS.LEFT_ELBOW, POSE_LANDMARKS.LEFT_WRIST],
+    [POSE_LANDMARKS.RIGHT_SHOULDER, POSE_LANDMARKS.RIGHT_ELBOW, POSE_LANDMARKS.RIGHT_WRIST]
+  );
   const spineLean = calculateSpineLean(lm);
 
-  const isElbowGood = avgElbow < 70 || avgElbow > 140;
-  const isSpineGood = spineLean < 15;
-  const isCorrect = isElbowGood && isSpineGood;
+  // Check shoulder swing (upper arm angle to hip)
+  const leftShoulderSwing = calculateAngle(lm[POSE_LANDMARKS.LEFT_HIP], lm[POSE_LANDMARKS.LEFT_SHOULDER], lm[POSE_LANDMARKS.LEFT_ELBOW]);
+  const isElbowPinned = leftShoulderSwing < 30;
+  const isSpineStable = spineLean < 16;
+  const isCorrect = isElbowPinned && isSpineStable;
+
+  let feedback = 'Good curl form! Elbows steady, full squeeze.';
+  if (!isElbowPinned) {
+    feedback = 'Keep your elbows pinned to your sides — don\'t swing.';
+  } else if (!isSpineStable) {
+    feedback = 'Avoid leaning back — isolate your biceps.';
+  }
 
   return {
     isCorrect,
-    feedback: isCorrect
-      ? 'Great bicep curl form! Controlled motion.'
-      : !isElbowGood
-      ? 'Squeeze at the top or lower completely for full extension.'
-      : 'Keep your torso still — don\'t swing your back for momentum.',
+    feedback,
     metrics: [
-      { label: 'Elbow Flex', value: `${avgElbow}°`, good: isElbowGood },
-      { label: 'Spine Stability', value: `${spineLean}°`, good: isSpineGood },
+      { label: 'Elbow Angle', value: `${elbowData.angle}°`, good: true },
+      { label: 'Arm Stability', value: `${leftShoulderSwing}°`, good: isElbowPinned },
     ],
   };
 }
 
 function analyzeOverheadPress(lm: Point3D[]): PostureResult {
-  const leftArm = calculateAngle(lm[POSE_LANDMARKS.LEFT_HIP], lm[POSE_LANDMARKS.LEFT_SHOULDER], lm[POSE_LANDMARKS.LEFT_WRIST]);
-  const rightArm = calculateAngle(lm[POSE_LANDMARKS.RIGHT_HIP], lm[POSE_LANDMARKS.RIGHT_SHOULDER], lm[POSE_LANDMARKS.RIGHT_WRIST]);
-  const avgArm = Math.round((leftArm + rightArm) / 2);
+  const armData = getBilateralAngle(
+    lm,
+    [POSE_LANDMARKS.LEFT_HIP, POSE_LANDMARKS.LEFT_SHOULDER, POSE_LANDMARKS.LEFT_WRIST],
+    [POSE_LANDMARKS.RIGHT_HIP, POSE_LANDMARKS.RIGHT_SHOULDER, POSE_LANDMARKS.RIGHT_WRIST]
+  );
   const spineLean = calculateSpineLean(lm);
-
-  const isArmOverhead = avgArm > 150 || avgArm < 90;
-  const isSpineSafe = spineLean < 15;
-  const isCorrect = isArmOverhead && isSpineSafe;
+  const isSpineSafe = spineLean < 16;
 
   return {
-    isCorrect,
-    feedback: isCorrect
-      ? 'Solid overhead press! Core locked, arms extending.'
-      : !isArmOverhead
-      ? 'Press fully overhead until elbows lock out.'
-      : 'Don\'t arch your lower back — brace your core.',
+    isCorrect: isSpineSafe,
+    feedback: isSpineSafe
+      ? 'Clean overhead drive! Ribs down, core tight.'
+      : 'Brace your core — don\'t arch your lower spine.',
     metrics: [
-      { label: 'Press Extension', value: `${avgArm}°`, good: isArmOverhead },
+      { label: 'Arm Extension', value: `${armData.angle}°`, good: true },
       { label: 'Back Arch', value: `${spineLean}°`, good: isSpineSafe },
     ],
   };
 }
 
 function analyzeBenchPress(lm: Point3D[]): PostureResult {
-  const leftElbow = calculateAngle(lm[POSE_LANDMARKS.LEFT_SHOULDER], lm[POSE_LANDMARKS.LEFT_ELBOW], lm[POSE_LANDMARKS.LEFT_WRIST]);
-  const rightElbow = calculateAngle(lm[POSE_LANDMARKS.RIGHT_SHOULDER], lm[POSE_LANDMARKS.RIGHT_ELBOW], lm[POSE_LANDMARKS.RIGHT_WRIST]);
-  const avgElbow = Math.round((leftElbow + rightElbow) / 2);
-
-  const isPressGood = avgElbow > 150 || avgElbow < 85;
-  const isCorrect = isPressGood;
-
+  const elbowData = getBilateralAngle(
+    lm,
+    [POSE_LANDMARKS.LEFT_SHOULDER, POSE_LANDMARKS.LEFT_ELBOW, POSE_LANDMARKS.LEFT_WRIST],
+    [POSE_LANDMARKS.RIGHT_SHOULDER, POSE_LANDMARKS.RIGHT_ELBOW, POSE_LANDMARKS.RIGHT_WRIST]
+  );
   return {
-    isCorrect,
-    feedback: isCorrect
-      ? 'Good bench press form! Wrists stacked over elbows.'
-      : 'Press fully to lock out or lower bar under control to chest.',
+    isCorrect: true,
+    feedback: 'Keep wrists stacked over elbows, control eccentric.',
     metrics: [
-      { label: 'Elbow Angle', value: `${avgElbow}°`, good: isPressGood },
+      { label: 'Elbow Angle', value: `${elbowData.angle}°`, good: true },
     ],
   };
 }
 
 function analyzeDeadlift(lm: Point3D[]): PostureResult {
   const spineLean = calculateSpineLean(lm);
-  const kneeAngle = calculateAngle(lm[POSE_LANDMARKS.LEFT_HIP], lm[POSE_LANDMARKS.LEFT_KNEE], lm[POSE_LANDMARKS.LEFT_ANKLE]);
+  const kneeData = getBilateralAngle(
+    lm,
+    [POSE_LANDMARKS.LEFT_HIP, POSE_LANDMARKS.LEFT_KNEE, POSE_LANDMARKS.LEFT_ANKLE],
+    [POSE_LANDMARKS.RIGHT_HIP, POSE_LANDMARKS.RIGHT_KNEE, POSE_LANDMARKS.RIGHT_ANKLE]
+  );
   const isSpineFlat = spineLean < 35;
-  const isHingeGood = kneeAngle > 100;
+  const isHingeGood = kneeData.angle > 100;
   const isCorrect = isSpineFlat && isHingeGood;
 
   return {
     isCorrect,
     feedback: isCorrect
-      ? 'Excellent deadlift hinge! Back neutral, chest up.'
+      ? 'Great hip hinge! Back neutral, chest proud.'
       : !isSpineFlat
-      ? 'Keep your back flat — don\'t round your lower spine.'
-      : 'Hinge at the hips — don\'t turn it into a squat.',
+      ? 'Keep your spine flat — do not round your back.'
+      : 'Hinge back at the hips — avoid turning into a squat.',
     metrics: [
       { label: 'Back Angle', value: `${spineLean}°`, good: isSpineFlat },
-      { label: 'Knee Bend', value: `${kneeAngle}°`, good: isHingeGood },
+      { label: 'Knee Bend', value: `${kneeData.angle}°`, good: isHingeGood },
     ],
   };
 }
 
 function analyzePullUp(lm: Point3D[]): PostureResult {
-  const leftElbow = calculateAngle(lm[POSE_LANDMARKS.LEFT_SHOULDER], lm[POSE_LANDMARKS.LEFT_ELBOW], lm[POSE_LANDMARKS.LEFT_WRIST]);
-  const isChinUp = leftElbow < 80;
-  const isHang = leftElbow > 150;
-  const isCorrect = isChinUp || isHang;
-
+  const elbowData = getBilateralAngle(
+    lm,
+    [POSE_LANDMARKS.LEFT_SHOULDER, POSE_LANDMARKS.LEFT_ELBOW, POSE_LANDMARKS.LEFT_WRIST],
+    [POSE_LANDMARKS.RIGHT_SHOULDER, POSE_LANDMARKS.RIGHT_ELBOW, POSE_LANDMARKS.RIGHT_WRIST]
+  );
   return {
-    isCorrect,
-    feedback: isCorrect
-      ? 'Great pull-up form! Full extension and peak chin over bar.'
-      : 'Pull higher to clear chin over bar or lower to dead hang.',
+    isCorrect: true,
+    feedback: 'Full range of motion: dead hang to chin over bar.',
     metrics: [
-      { label: 'Elbow Pull', value: `${leftElbow}°`, good: isCorrect },
+      { label: 'Elbow Pull', value: `${elbowData.angle}°`, good: true },
     ],
   };
 }
 
 function analyzeCalfRaise(lm: Point3D[]): PostureResult {
-  const leftAnkleY = lm[POSE_LANDMARKS.LEFT_ANKLE].y;
-  const leftToeY = lm[POSE_LANDMARKS.LEFT_FOOT_INDEX].y;
-  const isHeelRaised = leftAnkleY < leftToeY + 0.02;
+  const leftAnkleY = lm[POSE_LANDMARKS.LEFT_ANKLE]?.y ?? 0;
+  const leftToeY = lm[POSE_LANDMARKS.LEFT_FOOT_INDEX]?.y ?? 0;
+  const isHeelRaised = leftAnkleY < leftToeY + 0.015;
 
   return {
     isCorrect: true,
-    feedback: isHeelRaised
-      ? 'Peak calf contraction! Hold for 1 second.'
-      : 'Drive up onto your toes — flex your calves.',
+    feedback: isHeelRaised ? 'Peak contraction! Squeeze calves at top.' : 'Drive through your big toes.',
     metrics: [
-      { label: 'Heel Rise', value: isHeelRaised ? 'Raised' : 'Flat', good: true },
+      { label: 'Heel Position', value: isHeelRaised ? 'Contracted' : 'Ground', good: true },
     ],
   };
 }
 
-function analyzePushUp(lm: Point3D[]): PostureResult {
-  // Check body alignment (plank-like)
-  const hipAngle = calculateAngle(lm[POSE_LANDMARKS.LEFT_SHOULDER], lm[POSE_LANDMARKS.LEFT_HIP], lm[POSE_LANDMARKS.LEFT_ANKLE]);
-  const isHipGood = hipAngle >= 150 && hipAngle <= 180;
-  
-  // Check horizontal position (to avoid counting when standing)
-  const spineLean = calculateSpineLean(lm);
-  const isHorizontal = spineLean > 50;
-
-  const isCorrect = isHipGood && isHorizontal;
-
+function analyzeJumpingJack(lm: Point3D[]): PostureResult {
+  const armData = getBilateralAngle(
+    lm,
+    [POSE_LANDMARKS.LEFT_HIP, POSE_LANDMARKS.LEFT_SHOULDER, POSE_LANDMARKS.LEFT_WRIST],
+    [POSE_LANDMARKS.RIGHT_HIP, POSE_LANDMARKS.RIGHT_SHOULDER, POSE_LANDMARKS.RIGHT_WRIST]
+  );
   return {
-    isCorrect,
-    feedback: isCorrect
-      ? 'Good push-up form! Keep your core tight.'
-      : !isHorizontal
-      ? 'Get into a horizontal plank position on the floor.'
-      : 'Keep your body in a straight line — don\'t let hips sag or pike.',
+    isCorrect: true,
+    feedback: 'Rhythmic tempo, extend arms overhead with light feet.',
     metrics: [
-      { label: 'Body Alignment', value: `${hipAngle}°`, good: isHipGood },
-      { label: 'Position', value: isHorizontal ? 'Horizontal' : 'Standing', good: isHorizontal },
+      { label: 'Arm Reach', value: `${armData.angle}°`, good: true },
+    ],
+  };
+}
+
+function analyzeMountainClimber(lm: Point3D[]): PostureResult {
+  const spineLean = calculateSpineLean(lm);
+  const isHorizontal = spineLean > 40;
+  return {
+    isCorrect: isHorizontal,
+    feedback: isHorizontal ? 'Piston knees rapidly to chest, keep hips down.' : 'Stay horizontal in plank.',
+    metrics: [
+      { label: 'Plank Form', value: isHorizontal ? 'Horizontal' : 'Too Upright', good: isHorizontal },
+    ],
+  };
+}
+
+function analyzeCrunch(lm: Point3D[]): PostureResult {
+  const hipAngle = calculateAngle(lm[POSE_LANDMARKS.LEFT_SHOULDER], lm[POSE_LANDMARKS.LEFT_HIP], lm[POSE_LANDMARKS.LEFT_KNEE]);
+  return {
+    isCorrect: true,
+    feedback: 'Curl ribs towards pelvis — don\'t pull on your neck.',
+    metrics: [
+      { label: 'Core Flexion', value: `${hipAngle}°`, good: true },
+    ],
+  };
+}
+
+function analyzeRussianTwist(lm: Point3D[]): PostureResult {
+  const spineLean = calculateSpineLean(lm);
+  const isLeanGood = spineLean >= 25 && spineLean <= 55;
+  return {
+    isCorrect: isLeanGood,
+    feedback: isLeanGood ? 'Rotate through thoracic spine, keep core engaged.' : 'Maintain a 45° torso lean.',
+    metrics: [
+      { label: 'Torso Lean', value: `${spineLean}°`, good: isLeanGood },
+    ],
+  };
+}
+
+function analyzeLegRaise(lm: Point3D[]): PostureResult {
+  const hip = calculateAngle(lm[POSE_LANDMARKS.LEFT_SHOULDER], lm[POSE_LANDMARKS.LEFT_HIP], lm[POSE_LANDMARKS.LEFT_ANKLE]);
+  return {
+    isCorrect: true,
+    feedback: 'Lower back pinned to floor, lift with lower abs.',
+    metrics: [
+      { label: 'Leg Angle', value: `${hip}°`, good: true },
+    ],
+  };
+}
+
+function analyzeHeelTouch(lm: Point3D[]): PostureResult {
+  const leftShoulder = lm[POSE_LANDMARKS.LEFT_SHOULDER];
+  const rightShoulder = lm[POSE_LANDMARKS.RIGHT_SHOULDER];
+  const isVisible = (leftShoulder?.visibility ?? 0.5) > 0.35 && (rightShoulder?.visibility ?? 0.5) > 0.35;
+  return {
+    isCorrect: isVisible,
+    feedback: isVisible
+      ? 'Reach side-to-side contracting the obliques.'
+      : 'Keep your shoulders in view.',
+    metrics: [
+      { label: 'Oblique Focus', value: isVisible ? 'Active' : 'Reposition', good: isVisible },
     ],
   };
 }
 
 function analyzeSideArmRaise(lm: Point3D[]): PostureResult {
-  const leftArm = calculateAngle(lm[POSE_LANDMARKS.LEFT_HIP], lm[POSE_LANDMARKS.LEFT_SHOULDER], lm[POSE_LANDMARKS.LEFT_WRIST]);
-  const rightArm = calculateAngle(lm[POSE_LANDMARKS.RIGHT_HIP], lm[POSE_LANDMARKS.RIGHT_SHOULDER], lm[POSE_LANDMARKS.RIGHT_WRIST]);
-  const avgArm = Math.round((leftArm + rightArm) / 2);
+  const armData = getBilateralAngle(
+    lm,
+    [POSE_LANDMARKS.LEFT_HIP, POSE_LANDMARKS.LEFT_SHOULDER, POSE_LANDMARKS.LEFT_WRIST],
+    [POSE_LANDMARKS.RIGHT_HIP, POSE_LANDMARKS.RIGHT_SHOULDER, POSE_LANDMARKS.RIGHT_WRIST]
+  );
   const spineLean = calculateSpineLean(lm);
-  
-  const isSpineUpright = spineLean < 15;
-  const isArmNotTooHigh = avgArm < 110; // shouldn't go much higher than parallel
-  const isCorrect = isSpineUpright && isArmNotTooHigh;
+  const isUpright = spineLean < 15;
+  const isSafeHeight = armData.angle < 115;
+  const isCorrect = isUpright && isSafeHeight;
 
   return {
     isCorrect,
     feedback: isCorrect
-      ? 'Good side arm raise! Control the weight.'
-      : !isSpineUpright
-      ? 'Stand tall — don\'t lean forward or back.'
-      : 'Don\'t raise arms above shoulder level.',
+      ? 'Controlled lateral raise! Lead with elbows.'
+      : !isUpright
+      ? 'Stand tall — do not swing torso.'
+      : 'Stop at shoulder height — avoid shrugging.',
     metrics: [
-      { label: 'Arm Angle', value: `${avgArm}°`, good: isArmNotTooHigh },
-      { label: 'Spine Lean', value: `${spineLean}°`, good: isSpineUpright },
+      { label: 'Arm Height', value: `${armData.angle}°`, good: isSafeHeight },
+      { label: 'Spine Lean', value: `${spineLean}°`, good: isUpright },
     ],
   };
 }
 
 function analyzeArmCircles(lm: Point3D[]): PostureResult {
-  const leftArm = calculateAngle(lm[POSE_LANDMARKS.LEFT_HIP], lm[POSE_LANDMARKS.LEFT_SHOULDER], lm[POSE_LANDMARKS.LEFT_WRIST]);
-  const rightArm = calculateAngle(lm[POSE_LANDMARKS.RIGHT_HIP], lm[POSE_LANDMARKS.RIGHT_SHOULDER], lm[POSE_LANDMARKS.RIGHT_WRIST]);
-  const avgArm = Math.round((leftArm + rightArm) / 2);
-  
-  const isArmExtended = avgArm > 70 && avgArm < 110;
-  const spineLean = calculateSpineLean(lm);
-  const isSpineUpright = spineLean < 15;
-  const isCorrect = isArmExtended && isSpineUpright;
-
+  const armData = getBilateralAngle(
+    lm,
+    [POSE_LANDMARKS.LEFT_HIP, POSE_LANDMARKS.LEFT_SHOULDER, POSE_LANDMARKS.LEFT_WRIST],
+    [POSE_LANDMARKS.RIGHT_HIP, POSE_LANDMARKS.RIGHT_SHOULDER, POSE_LANDMARKS.RIGHT_WRIST]
+  );
+  const isExtended = armData.angle > 70 && armData.angle < 115;
   return {
-    isCorrect,
-    feedback: isCorrect
-      ? 'Good arm circles! Keep arms straight and extended.'
-      : !isArmExtended
-      ? 'Keep your arms extended straight out to the sides.'
-      : 'Stand tall with a straight spine.',
+    isCorrect: isExtended,
+    feedback: isExtended ? 'Keep arms straight, circular motion.' : 'Raise arms to shoulder height.',
     metrics: [
-      { label: 'Arm Extension', value: `${avgArm}°`, good: isArmExtended },
+      { label: 'Arm Extension', value: `${armData.angle}°`, good: isExtended },
     ],
   };
 }
@@ -710,21 +640,68 @@ function analyzeArmCircles(lm: Point3D[]): PostureResult {
 function analyzePunches(lm: Point3D[]): PostureResult {
   const leftElbow = calculateAngle(lm[POSE_LANDMARKS.LEFT_SHOULDER], lm[POSE_LANDMARKS.LEFT_ELBOW], lm[POSE_LANDMARKS.LEFT_WRIST]);
   const rightElbow = calculateAngle(lm[POSE_LANDMARKS.RIGHT_SHOULDER], lm[POSE_LANDMARKS.RIGHT_ELBOW], lm[POSE_LANDMARKS.RIGHT_WRIST]);
-  
-  const isPunching = leftElbow > 140 || rightElbow > 140; // at least one arm extended
+  return {
+    isCorrect: true,
+    feedback: 'Snap punches with full extension, keep opposite guard up.',
+    metrics: [
+      { label: 'Left Arm', value: `${leftElbow}°`, good: true },
+      { label: 'Right Arm', value: `${rightElbow}°`, good: true },
+    ],
+  };
+}
+
+function analyzeTreePose(lm: Point3D[]): PostureResult {
   const spineLean = calculateSpineLean(lm);
-  const isSpineUpright = spineLean < 25;
-  
-  const isCorrect = isSpineUpright;
+  const shoulderLevel = Math.abs((lm[POSE_LANDMARKS.LEFT_SHOULDER]?.y ?? 0) - (lm[POSE_LANDMARKS.RIGHT_SHOULDER]?.y ?? 0));
+  const isBalanced = spineLean < 12;
+  const isLevel = shoulderLevel < 0.06;
+  const isCorrect = isBalanced && isLevel;
 
   return {
     isCorrect,
-    feedback: isCorrect
-      ? (isPunching ? 'Great punch extension!' : 'Keep your guard up and punch!')
-      : 'Keep your core engaged and stay upright.',
+    feedback: isCorrect ? 'Beautiful tree pose balance!' : 'Align spine vertically over standing leg.',
     metrics: [
-      { label: 'Left Extension', value: `${leftElbow}°`, good: leftElbow > 140 },
-      { label: 'Right Extension', value: `${rightElbow}°`, good: rightElbow > 140 },
+      { label: 'Spine Balance', value: `${spineLean}°`, good: isBalanced },
+      { label: 'Shoulders', value: isLevel ? 'Level' : 'Tilted', good: isLevel },
+    ],
+  };
+}
+
+function analyzeWarriorPose(lm: Point3D[]): PostureResult {
+  const frontKnee = calculateAngle(lm[POSE_LANDMARKS.LEFT_HIP], lm[POSE_LANDMARKS.LEFT_KNEE], lm[POSE_LANDMARKS.LEFT_ANKLE]);
+  const isGood = frontKnee >= 80 && frontKnee <= 115;
+  return {
+    isCorrect: isGood,
+    feedback: isGood ? 'Strong warrior stance! Sink into front hip.' : 'Bend front knee towards 90°.',
+    metrics: [
+      { label: 'Front Knee', value: `${frontKnee}°`, good: isGood },
+    ],
+  };
+}
+
+function analyzeSpineTwist(lm: Point3D[]): PostureResult {
+  const spineLean = calculateSpineLean(lm);
+  const isUpright = spineLean < 25;
+  return {
+    isCorrect: isUpright,
+    feedback: isUpright ? 'Gentle spinal twist, inhale to lengthen, exhale to rotate.' : 'Sit or stand tall — keep spine elongated.',
+    metrics: [
+      { label: 'Spine Alignment', value: `${spineLean}°`, good: isUpright },
+    ],
+  };
+}
+
+function analyzeStandingStretch(lm: Point3D[]): PostureResult {
+  const armData = getBilateralAngle(
+    lm,
+    [POSE_LANDMARKS.LEFT_HIP, POSE_LANDMARKS.LEFT_SHOULDER, POSE_LANDMARKS.LEFT_WRIST],
+    [POSE_LANDMARKS.RIGHT_HIP, POSE_LANDMARKS.RIGHT_SHOULDER, POSE_LANDMARKS.RIGHT_WRIST]
+  );
+  return {
+    isCorrect: true,
+    feedback: 'Reach tall overhead, lengthen abdominal wall.',
+    metrics: [
+      { label: 'Reach', value: `${armData.angle}°`, good: true },
     ],
   };
 }

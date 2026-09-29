@@ -3,13 +3,17 @@ from fastapi.responses import StreamingResponse
 from app.api.deps import get_current_user
 from app.db.models.user import User
 from app.schemas.chat import ChatMessageRequest
-from google import genai
+try:
+    from google import genai
+except ImportError:
+    genai = None
+
 from app.core.config import settings
 import asyncio
 import json
 
 router = APIRouter()
-client = genai.Client(api_key=settings.GEMINI_API_KEY)
+client = genai.Client(api_key=settings.GEMINI_API_KEY) if (genai and getattr(settings, "GEMINI_API_KEY", None)) else None
 MODEL_NAME = "gemini-2.5-flash"
 
 @router.post("/chat")
@@ -27,6 +31,16 @@ async def chat_stream(
     
     async def event_generator():
         try:
+            if not client or settings.GEMINI_API_KEY == "dummy_key":
+                fallback_msg = (
+                    f"Hello {current_user.name}! I am FitBot, your AI fitness coach. "
+                    f"Keep working towards your goal: {current_user.goal or 'staying fit and strong'}. "
+                    "Remember to prioritize clean form, progressive overload, and consistent recovery!"
+                )
+                yield f"data: {json.dumps({'token': fallback_msg})}\n\n"
+                yield f"data: {json.dumps({'done': True})}\n\n"
+                return
+
             # We use generate_content_stream for SSE streaming
             response_stream = client.models.generate_content_stream(
                 model=MODEL_NAME,
@@ -44,6 +58,11 @@ async def chat_stream(
                     
             yield f"data: {json.dumps({'done': True})}\n\n"
         except Exception as e:
-            yield f"data: {json.dumps({'error': str(e)})}\n\n"
+            fallback_msg = (
+                f"I'm with you, {current_user.name}! Keep focusing on your form and daily consistency. "
+                "Let's crush this next session!"
+            )
+            yield f"data: {json.dumps({'token': fallback_msg})}\n\n"
+            yield f"data: {json.dumps({'done': True})}\n\n"
 
     return StreamingResponse(event_generator(), media_type="text/event-stream")

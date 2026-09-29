@@ -58,8 +58,6 @@ export default function Login() {
             shape: 'pill',
           });
         }
-
-        window.google.accounts.id.prompt();
       } catch (err) {
         console.warn('Google One Tap load error:', err);
       }
@@ -116,7 +114,7 @@ export default function Login() {
     setIsLoading(true);
     try {
       if (mode === 'login') {
-        await loginWithEmail(email);
+        await loginWithEmail(email, password);
         navigate('/dashboard');
       } else {
         if (!name) {
@@ -131,15 +129,15 @@ export default function Login() {
         }, 2000);
       }
     } catch {
-      setError('Authentication failed. Please try again.');
+      setError('Authentication failed. Please check credentials.');
     } finally {
       setIsLoading(false);
     }
   };
 
   const fillDemoCredentials = () => {
-    setEmail('alex.rivera@gmail.com');
-    setPassword('demo12345');
+    setEmail('alex@fitsync.ai');
+    setPassword('password123');
     setMode('login');
   };
 
@@ -149,7 +147,7 @@ export default function Login() {
         {/* Header Branding */}
         <div className="text-center space-y-2">
           <div className="inline-flex items-center gap-2 px-3 py-1 rounded-full bg-sage-100 text-sage-800 text-xs font-semibold">
-            <Sparkles className="w-3.5 h-3.5 text-sage-600" /> FitSynchAI Google Auth
+            <Sparkles className="w-3.5 h-3.5 text-sage-600" /> FitSync AI Google Auth
           </div>
           <h1 className="text-3xl font-bold text-earth-900">
             {mode === 'login' ? 'Welcome Back' : 'Create an Account'}

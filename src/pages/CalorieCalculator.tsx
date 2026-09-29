@@ -1,5 +1,5 @@
 import { useState, useRef } from 'react';
-import { Calculator, Activity, Flame, Loader2, Lightbulb, UtensilsCrossed, Sparkles, Camera, Upload, Scan, CheckCircle2, Apple } from 'lucide-react';
+import { Calculator, Flame, Loader2, Lightbulb, UtensilsCrossed, Sparkles, Camera, Upload, Scan, CheckCircle2, Apple } from 'lucide-react';
 import { safeGenerateContent, CALORIE_SYSTEM_INSTRUCTION } from '../lib/gemini';
 
 interface CalorieResult {

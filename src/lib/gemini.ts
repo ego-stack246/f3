@@ -63,7 +63,7 @@ export async function safeGenerateContent(params: {
       headers: {
         Authorization: `Bearer ${import.meta.env.VITE_OPENROUTER_API_KEY || 'sk-or-v1-fallback'}`,
         'HTTP-Referer': window.location.origin,
-        'X-Title': 'FitSynchAI',
+        'X-Title': 'FitSync AI',
         'Content-Type': 'application/json',
       },
       body: JSON.stringify({

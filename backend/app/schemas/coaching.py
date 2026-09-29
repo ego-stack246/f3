@@ -1,16 +1,16 @@
-from pydantic import BaseModel, ConfigDict
+from pydantic import BaseModel, ConfigDict, Field
 from typing import Optional, List, Any
-from datetime import date, datetime
+import datetime
 from uuid import UUID
 
 class DailyCheckinBase(BaseModel):
-    date: date
-    sleep_hours: float
-    energy: int
-    mood: int
-    soreness: int
-    stress: int
-    minutes_available: int
+    date: datetime.datetime = Field(default_factory=datetime.datetime.utcnow)
+    sleep_hours: float = 7.0
+    energy: int = 3
+    mood: int = 3
+    soreness: int = 1
+    stress: int = 1
+    minutes_available: int = 30
     notes: Optional[str] = None
 
 class DailyCheckinCreate(DailyCheckinBase):
@@ -25,7 +25,7 @@ class PlanGenerateRequest(BaseModel):
     checkin_id: Optional[UUID] = None
 
 class PlanBase(BaseModel):
-    date: date
+    date: datetime.datetime = Field(default_factory=datetime.datetime.utcnow)
     intensity_level: str
     rationale: str
     plan_json: dict[str, Any]
