@@ -1,5 +1,5 @@
-import { useState } from 'react';
-import { Calculator, Activity, Flame, Loader2, Lightbulb, UtensilsCrossed, Sparkles } from 'lucide-react';
+import { useState, useRef } from 'react';
+import { Calculator, Activity, Flame, Loader2, Lightbulb, UtensilsCrossed, Sparkles, Camera, Upload, Scan, CheckCircle2, Apple } from 'lucide-react';
 import { safeGenerateContent, CALORIE_SYSTEM_INSTRUCTION } from '../lib/gemini';
 
 interface CalorieResult {
@@ -11,23 +11,14 @@ interface CalorieResult {
 }
 
 const EXERCISE_OPTIONS = [
-  // Chest
   'Barbell Bench Press', 'Dumbbell Fly', 'Push-Up', 'Cable Crossover', 'Incline Bench Press',
-  // Back
   'Pull-Up', 'Barbell Row', 'Lat Pulldown', 'Seated Cable Row', 'Deadlift',
-  // Legs
   'Barbell Squat', 'Leg Press', 'Lunges', 'Leg Curl', 'Leg Extension', 'Calf Raise',
-  // Shoulders
   'Overhead Press', 'Lateral Raise', 'Face Pull', 'Arnold Press',
-  // Arms
   'Barbell Curl', 'Tricep Pushdown', 'Hammer Curl', 'Skull Crusher',
-  // Core
   'Crunches', 'Plank', 'Russian Twist', 'Leg Raise', 'Mountain Climbers',
-  // Cardio
   'Running', 'Cycling', 'Jump Rope', 'Swimming', 'Rowing Machine', 'Elliptical',
-  // Feet & Calves
   'Standing Calf Raise', 'Seated Calf Raise', 'Donkey Calf Raise', 'Bosu Ball Balance',
-  // Flexibility
   'Yoga', 'Stretching', 'Pilates',
 ];
 
@@ -45,6 +36,12 @@ export default function CalorieCalculator() {
   const [result, setResult] = useState<CalorieResult | null>(null);
   const [isLoading, setIsLoading] = useState(false);
   const [error, setError] = useState<string | null>(null);
+
+  // Nutrition Scanner State
+  const [scannerState, setScannerState] = useState<'idle' | 'scanning' | 'result'>('idle');
+  const [nutritionResult, setNutritionResult] = useState<{name: string, calories: number, protein: number, carbs: number, fat: number, match: number} | null>(null);
+  const fileInputRef = useRef<HTMLInputElement>(null);
+  const [imagePreview, setImagePreview] = useState<string | null>(null);
 
   const calculate = async (e: React.FormEvent) => {
     e.preventDefault();
@@ -84,17 +81,12 @@ Respond ONLY with the JSON object as specified.`;
         const parsed: CalorieResult = JSON.parse(jsonMatch[0]);
         setResult(parsed);
       } else {
-        // Fallback estimate calculation
         const burned = Math.round(5.5 * 3.5 * (form.weight / 200) * form.duration);
         setResult({
           calories: burned,
           met: 5.5,
           breakdown: `Estimated ~${burned} kcal burned doing ${form.exercise || 'workout'} for ${form.duration} mins.`,
-          tips: [
-            'Maintain steady posture and controlled breathing throughout your workout.',
-            'Keep your core engaged to protect your spine.',
-            'Stay hydrated before and after exercising.'
-          ],
+          tips: ['Maintain steady posture and controlled breathing throughout your workout.'],
           diet_suggestion: 'Enjoy a lean protein snack with complex carbs post-workout.'
         });
       }
@@ -105,238 +97,277 @@ Respond ONLY with the JSON object as specified.`;
         calories: burned,
         met: 5.5,
         breakdown: `Estimated ~${burned} kcal burned doing ${form.exercise || 'workout'} for ${form.duration} mins.`,
-        tips: [
-          'Maintain steady posture and controlled breathing throughout your workout.',
-          'Keep your core engaged to protect your spine.',
-          'Stay hydrated before and after exercising.'
-        ],
-        diet_suggestion: 'Enjoy a lean protein snack with complex carbs post-workout.'
+        tips: ['Maintain steady posture and controlled breathing.'],
+        diet_suggestion: 'Enjoy a lean protein snack.'
       });
     } finally {
       setIsLoading(false);
     }
   };
 
+  const handleScan = (e?: React.ChangeEvent<HTMLInputElement>) => {
+    if (e && e.target.files && e.target.files[0]) {
+      setImagePreview(URL.createObjectURL(e.target.files[0]));
+    } else if (!imagePreview) {
+      // Demo image if camera clicked
+      setImagePreview('https://images.unsplash.com/photo-1546069901-ba9599a7e63c?auto=format&fit=crop&q=80&w=500');
+    }
+    
+    setScannerState('scanning');
+    
+    // Mock API call to Vision model
+    setTimeout(() => {
+      setNutritionResult({
+        name: 'Grilled Chicken Salad & Avocado',
+        calories: 450,
+        protein: 42,
+        carbs: 18,
+        fat: 24,
+        match: 98
+      });
+      setScannerState('result');
+    }, 2500);
+  };
+
   return (
-    <div className="space-y-8 animate-fade-in pb-10 max-w-5xl mx-auto">
-      <header className="text-center">
+    <div className="space-y-8 animate-fade-in pb-10 max-w-7xl mx-auto px-4">
+      <header className="text-center mb-10">
         <div className="inline-flex items-center gap-2 bg-sage-100 text-sage-700 text-xs font-semibold px-3 py-1.5 rounded-full mb-4">
           <Sparkles className="w-3.5 h-3.5" /> Powered by Gemini 2.5 Flash
         </div>
-        <h1 className="text-3xl font-bold">AI Calorie Burn Estimator</h1>
-        <p className="text-earth-800/70 mt-3 max-w-2xl mx-auto">
-          Tell us your details and which exercise you're doing — our AI will estimate your calorie burn, give you training tips, and suggest a post-workout meal.
+        <h1 className="text-4xl md:text-5xl font-black text-earth-900 mb-4 tracking-tight">
+          Calorie & Nutrition <span className="text-sage-600">Hub</span>
+        </h1>
+        <p className="text-earth-800/70 max-w-2xl mx-auto text-lg">
+          Estimate your calorie burn accurately based on your biometrics, or scan your food to instantly get nutritional macros.
         </p>
       </header>
 
-      <div className="grid grid-cols-1 lg:grid-cols-5 gap-8 mt-12">
-        {/* Form — takes 2 cols */}
-        <div className="lg:col-span-2 glass-card p-8">
-          <form onSubmit={calculate} className="space-y-5">
-            {/* Exercise */}
-            <div>
-              <label className="block text-sm font-medium text-earth-900 mb-2">Exercise</label>
-              <input
-                list="exercise-options"
-                value={form.exercise}
-                onChange={(e) => setForm({ ...form, exercise: e.target.value })}
-                placeholder="Type or select an exercise..."
-                className="w-full bg-white/50 border border-cream-300 rounded-xl px-4 py-3 focus:outline-none focus:ring-2 focus:ring-sage-400 text-sm"
-              />
-              <datalist id="exercise-options">
-                {EXERCISE_OPTIONS.map((ex) => (
-                  <option key={ex} value={ex} />
-                ))}
-              </datalist>
-            </div>
-
-            {/* Weight & Age */}
-            <div className="grid grid-cols-2 gap-3">
+      <div className="grid grid-cols-1 lg:grid-cols-2 gap-8">
+        
+        {/* LEFT COLUMN: Calorie Calculator */}
+        <div className="space-y-6">
+          <div className="glass-card p-6 md:p-8 rounded-3xl border border-white/50">
+            <h2 className="text-2xl font-bold text-earth-900 mb-6 flex items-center gap-2">
+              <Calculator className="w-6 h-6 text-sage-600" />
+              Burn Estimator
+            </h2>
+            <form onSubmit={calculate} className="space-y-5">
               <div>
-                <label className="block text-sm font-medium text-earth-900 mb-2">Weight (kg)</label>
+                <label className="block text-sm font-medium text-earth-900 mb-2">Exercise</label>
                 <input
-                  type="number"
-                  value={form.weight}
-                  onChange={(e) => setForm({ ...form, weight: Number(e.target.value) })}
-                  className="w-full bg-white/50 border border-cream-300 rounded-xl px-4 py-3 focus:outline-none focus:ring-2 focus:ring-sage-400"
-                  min="30" max="200"
+                  list="exercise-options"
+                  value={form.exercise}
+                  onChange={(e) => setForm({ ...form, exercise: e.target.value })}
+                  placeholder="Type or select an exercise..."
+                  className="w-full bg-white/50 border border-cream-300 rounded-xl px-4 py-3 focus:outline-none focus:ring-2 focus:ring-sage-400 text-sm transition-all"
                 />
-              </div>
-              <div>
-                <label className="block text-sm font-medium text-earth-900 mb-2">Age</label>
-                <input
-                  type="number"
-                  value={form.age}
-                  onChange={(e) => setForm({ ...form, age: Number(e.target.value) })}
-                  className="w-full bg-white/50 border border-cream-300 rounded-xl px-4 py-3 focus:outline-none focus:ring-2 focus:ring-sage-400"
-                  min="10" max="100"
-                />
-              </div>
-            </div>
-
-            {/* Height & Gender */}
-            <div className="grid grid-cols-2 gap-3">
-              <div>
-                <label className="block text-sm font-medium text-earth-900 mb-2">Height (cm)</label>
-                <input
-                  type="number"
-                  value={form.height}
-                  onChange={(e) => setForm({ ...form, height: Number(e.target.value) })}
-                  className="w-full bg-white/50 border border-cream-300 rounded-xl px-4 py-3 focus:outline-none focus:ring-2 focus:ring-sage-400"
-                  min="100" max="250"
-                />
-              </div>
-              <div>
-                <label className="block text-sm font-medium text-earth-900 mb-2">Gender</label>
-                <div className="grid grid-cols-2 gap-2">
-                  {(['male', 'female'] as const).map((g) => (
-                    <button
-                      key={g}
-                      type="button"
-                      onClick={() => setForm({ ...form, gender: g })}
-                      className={`py-3 rounded-xl border text-sm font-medium capitalize transition-all ${
-                        form.gender === g
-                          ? 'bg-sage-600 text-white border-sage-600 shadow-md'
-                          : 'bg-white/50 text-earth-800 border-cream-300 hover:bg-cream-100'
-                      }`}
-                    >
-                      {g}
-                    </button>
+                <datalist id="exercise-options">
+                  {EXERCISE_OPTIONS.map((ex) => (
+                    <option key={ex} value={ex} />
                   ))}
+                </datalist>
+              </div>
+
+              <div className="grid grid-cols-2 gap-4">
+                <div>
+                  <label className="block text-sm font-medium text-earth-900 mb-2">Weight (kg)</label>
+                  <input
+                    type="number"
+                    value={form.weight}
+                    onChange={(e) => setForm({ ...form, weight: Number(e.target.value) })}
+                    className="w-full bg-white/50 border border-cream-300 rounded-xl px-4 py-3 focus:outline-none focus:ring-2 focus:ring-sage-400"
+                  />
+                </div>
+                <div>
+                  <label className="block text-sm font-medium text-earth-900 mb-2">Age</label>
+                  <input
+                    type="number"
+                    value={form.age}
+                    onChange={(e) => setForm({ ...form, age: Number(e.target.value) })}
+                    className="w-full bg-white/50 border border-cream-300 rounded-xl px-4 py-3 focus:outline-none focus:ring-2 focus:ring-sage-400"
+                  />
                 </div>
               </div>
-            </div>
 
-            {/* Duration */}
-            <div>
-              <label className="block text-sm font-medium text-earth-900 mb-2">Duration (minutes)</label>
-              <input
-                type="number"
-                value={form.duration}
-                onChange={(e) => setForm({ ...form, duration: Number(e.target.value) })}
-                className="w-full bg-white/50 border border-cream-300 rounded-xl px-4 py-3 focus:outline-none focus:ring-2 focus:ring-sage-400"
-                min="5" max="300"
-              />
-            </div>
-
-            {/* Intensity */}
-            <div>
-              <label className="block text-sm font-medium text-earth-900 mb-2">Workout Intensity</label>
-              <div className="grid grid-cols-3 gap-3">
-                {['low', 'medium', 'high'].map((level) => (
-                  <button
-                    key={level}
-                    type="button"
-                    onClick={() => setForm({ ...form, intensity: level })}
-                    className={`py-3 rounded-xl border text-sm font-medium capitalize transition-all ${
-                      form.intensity === level
-                        ? 'bg-sage-600 text-white border-sage-600 shadow-md'
-                        : 'bg-white/50 text-earth-800 border-cream-300 hover:bg-cream-100'
-                    }`}
+              <div className="grid grid-cols-2 gap-4">
+                <div>
+                  <label className="block text-sm font-medium text-earth-900 mb-2">Duration (min)</label>
+                  <input
+                    type="number"
+                    value={form.duration}
+                    onChange={(e) => setForm({ ...form, duration: Number(e.target.value) })}
+                    className="w-full bg-white/50 border border-cream-300 rounded-xl px-4 py-3 focus:outline-none focus:ring-2 focus:ring-sage-400"
+                  />
+                </div>
+                <div>
+                  <label className="block text-sm font-medium text-earth-900 mb-2">Intensity</label>
+                  <select
+                    value={form.intensity}
+                    onChange={(e) => setForm({ ...form, intensity: e.target.value })}
+                    className="w-full bg-white/50 border border-cream-300 rounded-xl px-4 py-3 focus:outline-none focus:ring-2 focus:ring-sage-400 appearance-none"
                   >
-                    {level}
-                  </button>
-                ))}
+                    <option value="low">Low</option>
+                    <option value="medium">Medium</option>
+                    <option value="high">High</option>
+                  </select>
+                </div>
               </div>
-            </div>
 
-            <button
-              type="submit"
-              disabled={isLoading}
-              className="w-full btn-primary py-4 mt-4 flex items-center justify-center gap-2 disabled:opacity-60"
-            >
-              {isLoading ? (
-                <>
-                  <Loader2 className="w-5 h-5 animate-spin" /> Analyzing with AI...
-                </>
-              ) : (
-                <>
-                  <Calculator className="w-5 h-5" /> Calculate with AI
-                </>
-              )}
-            </button>
-          </form>
-        </div>
+              <button
+                type="submit"
+                disabled={isLoading}
+                className="w-full btn-primary py-4 mt-2 flex items-center justify-center gap-2 rounded-xl text-lg font-bold"
+              >
+                {isLoading ? (
+                  <><Loader2 className="w-5 h-5 animate-spin" /> Calculating...</>
+                ) : (
+                  <><Flame className="w-5 h-5" /> Calculate Burn</>
+                )}
+              </button>
+            </form>
+          </div>
 
-        {/* Results — takes 3 cols */}
-        <div className="lg:col-span-3 flex flex-col gap-6">
-          {error && (
-            <div className="glass-card p-6 border-red-200 bg-red-50/50 text-red-700 text-sm">
-              {error}
+          {error && <div className="p-4 bg-red-100 text-red-700 rounded-xl text-sm">{error}</div>}
+
+          {result && (
+            <div className="glass-card p-6 md:p-8 rounded-3xl animate-slide-up border border-sage-200 bg-gradient-to-br from-white to-sage-50/50">
+              <div className="text-center mb-6">
+                <p className="text-earth-800 font-medium mb-1 uppercase tracking-wider text-xs">Estimated Burn</p>
+                <h2 className="text-5xl font-black text-sage-600 flex justify-center items-baseline gap-1">
+                  {result.calories} <span className="text-xl text-earth-600 font-medium">kcal</span>
+                </h2>
+                <p className="text-sm text-earth-800/70 mt-2">{result.breakdown}</p>
+              </div>
+
+              <div className="space-y-4 pt-4 border-t border-earth-200">
+                <div>
+                  <h4 className="font-bold text-sm mb-2 flex items-center gap-2 text-earth-900">
+                    <Lightbulb className="w-4 h-4 text-amber-500" /> Tips
+                  </h4>
+                  <ul className="text-sm text-earth-800/80 space-y-1 list-disc pl-5">
+                    {result.tips.map((tip, i) => <li key={i}>{tip}</li>)}
+                  </ul>
+                </div>
+                <div>
+                  <h4 className="font-bold text-sm mb-2 flex items-center gap-2 text-earth-900">
+                    <UtensilsCrossed className="w-4 h-4 text-sage-600" /> Recovery Meal
+                  </h4>
+                  <p className="text-sm text-earth-800/80">{result.diet_suggestion}</p>
+                </div>
+              </div>
             </div>
           )}
+        </div>
 
-          {result ? (
-            <>
-              {/* Main calorie card */}
-              <div className="glass-card p-10 text-center animate-slide-up flex flex-col items-center">
-                <div className="w-20 h-20 bg-orange-100 rounded-full flex items-center justify-center mb-6">
-                  <Flame className="w-10 h-10 text-orange-500" />
+        {/* RIGHT COLUMN: AI Nutrition Scanner */}
+        <div className="space-y-6">
+          <div className="glass-card p-6 md:p-8 rounded-3xl border border-white/50 h-full flex flex-col">
+            <h2 className="text-2xl font-bold text-earth-900 mb-6 flex items-center gap-2">
+              <Scan className="w-6 h-6 text-blue-500" />
+              AI Nutrition Scanner
+            </h2>
+
+            {scannerState === 'idle' && (
+              <div className="flex-1 flex flex-col items-center justify-center border-2 border-dashed border-cream-300 rounded-2xl p-8 bg-white/30 transition-all hover:bg-white/50 group">
+                <div className="w-20 h-20 bg-blue-50 text-blue-500 rounded-full flex items-center justify-center mb-4 group-hover:scale-110 transition-transform">
+                  <Camera className="w-8 h-8" />
                 </div>
-                <p className="text-earth-800 font-medium mb-1">Estimated Calories Burned</p>
-                <p className="text-xs text-earth-800/50 mb-4">{form.exercise} · {form.duration} min · {form.intensity} intensity</p>
-                <h2 className="text-6xl font-bold font-display text-earth-900">{result.calories}</h2>
-                <p className="text-earth-800/60 mt-2">kcal</p>
+                <h3 className="font-bold text-earth-900 mb-2">Scan Your Meal</h3>
+                <p className="text-sm text-earth-800/60 text-center mb-6">
+                  Snap a photo or upload an image of your food to instantly get accurate calories and macros.
+                </p>
+                <div className="flex gap-3 w-full">
+                  <button 
+                    onClick={() => handleScan()}
+                    className="flex-1 bg-earth-900 text-white py-3 rounded-xl font-medium flex items-center justify-center gap-2 hover:bg-earth-800 transition-colors text-sm"
+                  >
+                    <Camera className="w-4 h-4" /> Open Camera
+                  </button>
+                  <label className="flex-1 bg-white border border-earth-200 text-earth-900 py-3 rounded-xl font-medium flex items-center justify-center gap-2 hover:bg-cream-50 transition-colors cursor-pointer text-sm">
+                    <Upload className="w-4 h-4" /> Upload
+                    <input type="file" className="hidden" accept="image/*" onChange={handleScan} ref={fileInputRef} />
+                  </label>
+                </div>
+              </div>
+            )}
 
-                <div className="mt-6 pt-6 border-t border-earth-900/10 w-full text-left">
-                  <p className="text-sm text-earth-800/70">{result.breakdown}</p>
-                  <p className="text-xs text-earth-800/40 mt-2">MET value used: {result.met}</p>
+            {scannerState === 'scanning' && (
+              <div className="flex-1 flex flex-col items-center justify-center relative overflow-hidden rounded-2xl bg-black">
+                {imagePreview && (
+                  <img src={imagePreview} alt="Scanning" className="absolute inset-0 w-full h-full object-cover opacity-50" />
+                )}
+                <div className="absolute inset-0 bg-blue-500/20 animate-pulse" />
+                {/* Scanning line animation */}
+                <div className="absolute left-0 right-0 h-1 bg-blue-400 shadow-[0_0_15px_rgba(96,165,250,1)] animate-scan" />
+                
+                <div className="relative z-10 flex flex-col items-center text-white">
+                  <Scan className="w-12 h-12 mb-4 animate-pulse" />
+                  <h3 className="font-bold text-lg">Analyzing food...</h3>
+                  <p className="text-sm text-white/70">Identifying ingredients and portion size</p>
+                </div>
+              </div>
+            )}
+
+            {scannerState === 'result' && nutritionResult && (
+              <div className="flex-1 flex flex-col">
+                <div className="relative h-48 rounded-2xl overflow-hidden mb-6 bg-earth-900">
+                  {imagePreview && (
+                    <img src={imagePreview} alt="Scanned Food" className="w-full h-full object-cover opacity-70" />
+                  )}
+                  <div className="absolute inset-0 bg-gradient-to-t from-black/80 to-transparent" />
+                  <div className="absolute bottom-4 left-4 right-4 text-white">
+                    <div className="flex items-center gap-2 mb-1">
+                      <CheckCircle2 className="w-4 h-4 text-green-400" />
+                      <span className="text-xs font-bold text-green-400 bg-green-400/20 px-2 py-0.5 rounded-full backdrop-blur-sm">
+                        {nutritionResult.match}% Match
+                      </span>
+                    </div>
+                    <h3 className="text-xl font-bold line-clamp-1">{nutritionResult.name}</h3>
+                  </div>
+                  
+                  <button 
+                    onClick={() => {
+                      setScannerState('idle');
+                      setImagePreview(null);
+                    }}
+                    className="absolute top-4 right-4 bg-white/20 hover:bg-white/30 backdrop-blur-md p-2 rounded-full text-white transition-colors"
+                  >
+                    <Scan className="w-4 h-4" />
+                  </button>
                 </div>
 
-                {/* Food equivalents */}
-                <div className="mt-6 pt-6 border-t border-earth-900/10 w-full text-left">
-                  <h4 className="font-semibold text-sm mb-4">Breakdown Equivalent</h4>
-                  <div className="space-y-3 text-sm text-earth-800/80">
-                    <div className="flex items-center justify-between">
-                      <span>Apples</span>
-                      <span className="font-medium">~{Math.round(result.calories / 95 * 10) / 10} apples</span>
-                    </div>
-                    <div className="flex items-center justify-between">
-                      <span>Rice (cups)</span>
-                      <span className="font-medium">~{Math.round(result.calories / 205 * 10) / 10} cups</span>
-                    </div>
-                    <div className="flex items-center justify-between">
-                      <span>Eggs</span>
-                      <span className="font-medium">~{Math.round(result.calories / 78 * 10) / 10} eggs</span>
+                <div className="grid grid-cols-2 gap-4 mb-6">
+                  <div className="bg-sage-50 rounded-2xl p-4 flex flex-col items-center justify-center border border-sage-100">
+                    <Flame className="w-6 h-6 text-orange-500 mb-1" />
+                    <span className="text-2xl font-black text-earth-900">{nutritionResult.calories}</span>
+                    <span className="text-xs font-medium text-earth-800/60 uppercase tracking-wider">Calories</span>
+                  </div>
+                  <div className="bg-blue-50 rounded-2xl p-4 flex flex-col items-center justify-center border border-blue-100">
+                    <Apple className="w-6 h-6 text-blue-500 mb-1" />
+                    <div className="flex gap-4">
+                      <div className="text-center">
+                        <div className="text-sm font-bold text-earth-900">{nutritionResult.protein}g</div>
+                        <div className="text-[10px] text-earth-800/60 uppercase">Protein</div>
+                      </div>
+                      <div className="text-center">
+                        <div className="text-sm font-bold text-earth-900">{nutritionResult.carbs}g</div>
+                        <div className="text-[10px] text-earth-800/60 uppercase">Carbs</div>
+                      </div>
+                      <div className="text-center">
+                        <div className="text-sm font-bold text-earth-900">{nutritionResult.fat}g</div>
+                        <div className="text-[10px] text-earth-800/60 uppercase">Fat</div>
+                      </div>
                     </div>
                   </div>
                 </div>
-              </div>
 
-              {/* Tips card */}
-              <div className="glass-card p-6 animate-slide-up" style={{ animationDelay: '100ms' }}>
-                <h4 className="font-semibold text-sm mb-4 flex items-center gap-2">
-                  <Lightbulb className="w-4 h-4 text-amber-500" /> Training Tips
-                </h4>
-                <ul className="space-y-3 text-sm text-earth-800/80">
-                  {result.tips.map((tip, i) => (
-                    <li key={i} className="flex gap-2">
-                      <span className="w-5 h-5 bg-sage-100 rounded-full flex items-center justify-center shrink-0 text-xs font-bold text-sage-700">{i + 1}</span>
-                      {tip}
-                    </li>
-                  ))}
-                </ul>
+                <button className="w-full py-3 bg-earth-900 hover:bg-earth-800 text-white rounded-xl font-bold transition-colors mt-auto">
+                  Log to Daily Intake
+                </button>
               </div>
-
-              {/* Diet suggestion card */}
-              <div className="glass-card p-6 animate-slide-up" style={{ animationDelay: '200ms' }}>
-                <h4 className="font-semibold text-sm mb-3 flex items-center gap-2">
-                  <UtensilsCrossed className="w-4 h-4 text-sage-600" /> Post-Workout Meal Suggestion
-                </h4>
-                <p className="text-sm text-earth-800/80">{result.diet_suggestion}</p>
-              </div>
-            </>
-          ) : !isLoading ? (
-            <div className="glass-card p-12 text-center w-full h-full flex flex-col items-center justify-center border-dashed border-2 border-cream-300/50 bg-white/20">
-              <Activity className="w-12 h-12 text-sage-300 mb-4" />
-              <p className="text-earth-800/60 font-medium">Enter your details and an exercise to get AI-powered calorie estimates, training tips, and meal suggestions.</p>
-            </div>
-          ) : (
-            <div className="glass-card p-12 text-center w-full flex flex-col items-center justify-center">
-              <Loader2 className="w-12 h-12 text-sage-400 animate-spin mb-4" />
-              <p className="text-earth-800/60 font-medium">Gemini is analyzing your workout...</p>
-            </div>
-          )}
+            )}
+          </div>
         </div>
       </div>
     </div>

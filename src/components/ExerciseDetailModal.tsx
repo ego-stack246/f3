@@ -127,7 +127,7 @@ export default function ExerciseDetailModal({ workout, isOpen, onClose }: Exerci
           </div>
 
           {/* Body */}
-          <div className="flex-1 overflow-y-auto p-6 sm:p-8 space-y-8 relative bg-gradient-to-b from-transparent to-black/20">
+          <div className={`flex-1 overflow-y-auto relative bg-gradient-to-b from-transparent to-black/20 ${activeTab === 'camera' ? 'p-4 sm:p-6 flex flex-col' : 'p-6 sm:p-8 space-y-8'}`}>
             {/* OVERVIEW */}
             {activeTab === 'overview' && (
               <motion.div initial={{ opacity: 0, y: 10 }} animate={{ opacity: 1, y: 0 }} className="space-y-8">
@@ -161,16 +161,16 @@ export default function ExerciseDetailModal({ workout, isOpen, onClose }: Exerci
 
             {/* AI CAMERA */}
             {activeTab === 'camera' && (
-              <motion.div initial={{ opacity: 0, y: 10 }} animate={{ opacity: 1, y: 0 }} className="space-y-4 h-[500px] flex flex-col">
-                <div className="flex flex-col sm:flex-row items-start sm:items-center justify-between gap-2 text-sm text-sage-300 bg-emerald-950/30 p-4 rounded-2xl border border-emerald-500/20">
+              <motion.div initial={{ opacity: 0, y: 10 }} animate={{ opacity: 1, y: 0 }} className="space-y-4 flex-1 flex flex-col min-h-[50vh]">
+                <div className="flex flex-col sm:flex-row items-start sm:items-center justify-between gap-2 text-sm text-sage-300 bg-emerald-950/30 p-4 rounded-2xl border border-emerald-500/20 shrink-0">
                   <span className="flex items-center gap-2"><Sparkles className="w-4 h-4 text-emerald-400" /> Center yourself in frame • Ensure full body visibility</span>
                   <span className="flex items-center gap-2 text-emerald-400 font-bold bg-emerald-500/10 px-3 py-1.5 rounded-full">
                     <span className="w-2 h-2 rounded-full bg-emerald-400 animate-pulse" /> Live Analysis
                   </span>
                 </div>
-                <div className="flex-1 rounded-[2rem] overflow-hidden border-2 border-white/10 shadow-2xl relative group">
+                <div className="flex-1 min-h-[300px] rounded-[2rem] overflow-hidden border-2 border-white/10 shadow-2xl relative group">
                   <div className="absolute inset-0 bg-gradient-to-t from-emerald-900/40 to-transparent pointer-events-none z-10 opacity-0 group-hover:opacity-100 transition-opacity duration-500" />
-                  <PoseCamera exercise={workout.exercise} enabled={activeTab === 'camera'} className="h-full w-full" />
+                  <PoseCamera exercise={workout.exercise} enabled={activeTab === 'camera'} className="h-full w-full absolute inset-0" />
                 </div>
               </motion.div>
             )}

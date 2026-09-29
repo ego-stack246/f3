@@ -23,7 +23,7 @@ export default function PoseCamera({ exercise, enabled, className }: PoseCameraP
   };
 
   return (
-    <div className={cn('relative aspect-video bg-black rounded-2xl overflow-hidden shadow-2xl', className)}>
+    <div className={cn('relative w-full h-full bg-black rounded-2xl overflow-hidden shadow-2xl flex items-center justify-center', className)}>
       {/* Video Feed */}
       <video
         ref={videoRef}
@@ -37,7 +37,7 @@ export default function PoseCamera({ exercise, enabled, className }: PoseCameraP
       {/* Skeleton Canvas Overlay */}
       <canvas
         ref={canvasRef}
-        className="absolute inset-0 w-full h-full pointer-events-none"
+        className="absolute inset-0 w-full h-full object-cover pointer-events-none"
         style={{ transform: 'scaleX(-1)' }}
       />
 
