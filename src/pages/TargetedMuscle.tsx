@@ -1,6 +1,7 @@
 import { useState } from 'react';
 import Model from 'react-body-highlighter';
 import { Play, ChevronRight, Activity, Filter, Info } from 'lucide-react';
+import exercisesData from '../data/exercises-library.json';
 
 const equipments = ['Bodyweight', 'Dumbbell', 'Barbell', 'Cables', 'Machine'];
 
@@ -63,24 +64,47 @@ export default function TargetedMuscle() {
   };
 
   const getExercises = (muscle: string, eq: string) => {
-    return [
-      {
-        id: 1,
-        name: `${eq} ${muscle.charAt(0).toUpperCase() + muscle.slice(1)} Press`,
-        image: getMuscleImage(muscle, 0),
-        video: `https://www.youtube.com/results?search_query=${encodeURIComponent(`${eq} ${muscle} exercise form tutorial`)}`,
-        description: `Focus on form and controlled movement for the ${muscle}.`,
-        sets: "3 sets x 10 reps"
-      },
-      {
-        id: 2,
-        name: `${eq} ${getAction(muscle)} for ${muscle.charAt(0).toUpperCase() + muscle.slice(1)}`,
-        image: getMuscleImage(muscle, 1),
-        video: `https://www.youtube.com/results?search_query=${encodeURIComponent(`${eq} isolated ${muscle} workout form tutorial`)}`,
-        description: "Keep your core tight throughout the movement to maximize gains.",
-        sets: "4 sets x 12 reps"
-      }
-    ];
+    const mappedEq = eq.toLowerCase().replace('bodyweight', 'body weight').replace('cables', 'cable');
+    
+    const filtered = exercisesData.filter((ex: any) => {
+      // Equipment Match
+      const eqMatch = eq === 'Machine' 
+        ? ex.equipment.includes('machine') 
+        : ex.equipment === mappedEq;
+        
+      // Muscle Match
+      const m = muscle.toLowerCase();
+      let mMatch = ex.target.includes(m) || ex.bodyPart.includes(m) || ex.category.includes(m);
+      
+      // Handle react-body-highlighter specific names vs API names
+      if (m === 'quadriceps') mMatch = ex.target === 'quads' || ex.bodyPart === 'upper legs';
+      if (m === 'hamstring') mMatch = ex.target === 'hamstrings' || ex.bodyPart === 'upper legs';
+      if (m === 'gluteal') mMatch = ex.target === 'glutes';
+      if (m === 'abs' || m === 'obliques') mMatch = ex.target === 'abs' || ex.bodyPart === 'waist';
+      if (m.includes('back')) mMatch = ex.bodyPart === 'back' || ex.category === 'back';
+      if (m.includes('deltoids')) mMatch = ex.bodyPart === 'shoulders' || ex.target === 'delts';
+      if (m === 'calves') mMatch = ex.target === 'calves' || ex.bodyPart === 'lower legs';
+      if (m === 'forearm') mMatch = ex.target.includes('forearm') || ex.bodyPart === 'lower arms';
+      
+      return eqMatch && mMatch;
+    });
+
+    // Fallback if no exact equipment match found (so UI doesn't look broken)
+    if (filtered.length === 0) {
+      return exercisesData.filter((ex: any) => {
+        const m = muscle.toLowerCase();
+        let mMatch = ex.target.includes(m) || ex.bodyPart.includes(m) || ex.category.includes(m);
+        if (m === 'quadriceps') mMatch = ex.target === 'quads' || ex.bodyPart === 'upper legs';
+        if (m === 'hamstring') mMatch = ex.target === 'hamstrings' || ex.bodyPart === 'upper legs';
+        if (m === 'gluteal') mMatch = ex.target === 'glutes';
+        if (m === 'abs' || m === 'obliques') mMatch = ex.target === 'abs' || ex.bodyPart === 'waist';
+        if (m.includes('back')) mMatch = ex.bodyPart === 'back';
+        if (m.includes('deltoids')) mMatch = ex.bodyPart === 'shoulders';
+        return mMatch;
+      }).slice(0, 4);
+    }
+
+    return filtered.slice(0, 4);
   };
 
   return (
@@ -170,39 +194,45 @@ export default function TargetedMuscle() {
               </div>
               
               <div className="grid grid-cols-1 md:grid-cols-2 gap-6">
-                {getExercises(selectedMuscle, selectedEquipment).map(exercise => (
+                {getExercises(selectedMuscle, selectedEquipment).map((exercise: any) => (
                   <div key={exercise.id} className="glass-card rounded-3xl overflow-hidden group hover:shadow-xl transition-all duration-300 border border-white/50">
-                    <div className="relative h-48 overflow-hidden">
+                    <div className="relative h-48 overflow-hidden bg-white flex items-center justify-center p-4">
                       <img
-                        src={exercise.image}
+                        src={exercise.gifUrl}
                         alt={exercise.name}
-                        className="w-full h-full object-cover group-hover:scale-105 transition-transform duration-500"
+                        className="w-full h-full object-contain group-hover:scale-105 transition-transform duration-500"
+                        loading="lazy"
                       />
-                      <div className="absolute inset-0 bg-gradient-to-t from-black/60 to-transparent flex items-end p-4">
-                        <a
-                          href={exercise.video}
-                          target="_blank"
-                          rel="noopener noreferrer"
-                          className="flex items-center gap-2 bg-white/20 backdrop-blur-md text-white px-4 py-2 rounded-full text-xs font-bold hover:bg-sage-500 transition-colors border border-white/30"
-                        >
-                          <Play className="w-3.5 h-3.5 fill-white" /> Watch Tutorial
-                        </a>
+                      <div className="absolute inset-0 bg-gradient-to-t from-black/60 via-transparent to-transparent flex items-end p-4">
+                        <div className="flex gap-2">
+                          <span className="text-[10px] font-bold px-2 py-1 bg-white/20 backdrop-blur-md rounded-full text-white capitalize border border-white/30">
+                            {exercise.equipment}
+                          </span>
+                          <span className="text-[10px] font-bold px-2 py-1 bg-sage-500/80 backdrop-blur-md rounded-full text-white capitalize border border-white/30">
+                            {exercise.target}
+                          </span>
+                        </div>
                       </div>
                     </div>
-                    <div className="p-5">
-                      <h4 className="font-bold text-lg text-earth-900 mb-2 group-hover:text-sage-600 transition-colors">
+                    <div className="p-5 flex flex-col h-[200px]">
+                      <h4 className="font-bold text-lg text-earth-900 mb-2 group-hover:text-sage-600 transition-colors capitalize line-clamp-1">
                         {exercise.name}
                       </h4>
-                      <p className="text-sm text-earth-800/70 mb-4 line-clamp-2">
-                        {exercise.description}
+                      <p className="text-sm text-earth-800/70 mb-4 line-clamp-3 flex-1">
+                        {exercise.instructions ? exercise.instructions.join(' ') : 'Focus on form and controlled movement.'}
                       </p>
                       <div className="flex items-center justify-between mt-auto">
                         <span className="text-xs font-black text-earth-900 bg-cream-100 px-3 py-1.5 rounded-lg border border-earth-200/50">
-                          {exercise.sets}
+                          {exercise.category}
                         </span>
-                        <button className="text-sage-600 hover:text-sage-700 p-2 bg-sage-50 rounded-full transition-colors group-hover:bg-sage-100">
-                          <ChevronRight className="w-5 h-5" />
-                        </button>
+                        <a 
+                          href={`https://www.youtube.com/results?search_query=${encodeURIComponent(exercise.name + ' form tutorial')}`}
+                          target="_blank"
+                          rel="noopener noreferrer"
+                          className="text-white hover:text-white p-2.5 bg-sage-500 rounded-full shadow-lg shadow-sage-500/30 transition-all hover:bg-sage-600 hover:scale-110 flex items-center gap-2"
+                        >
+                          <Play className="w-4 h-4 fill-current" />
+                        </a>
                       </div>
                     </div>
                   </div>

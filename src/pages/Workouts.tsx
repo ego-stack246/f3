@@ -105,7 +105,13 @@ const WORKOUTS: WorkoutDetail[] = [
   ...EXTRA_WORKOUTS,
 ];
 
-const CATEGORIES = ['All', ...Array.from(new Set(WORKOUTS.map(w => w.category)))].sort();
+const CATEGORIES = ['All', 'Gym', ...Array.from(new Set(WORKOUTS.map(w => w.category)))].sort((a, b) => {
+  if (a === 'All') return -1;
+  if (b === 'All') return 1;
+  if (a === 'Gym') return -1;
+  if (b === 'Gym') return 1;
+  return a.localeCompare(b as string);
+});
 const LEVELS = ['All Levels', 'Beginner', 'Intermediate', 'Advanced'];
 const TYPES = ['All Types', 'Strength', 'Cardio', 'Flexibility'];
 const EQUIPMENT = ['All Equipment', ...Array.from(new Set(WORKOUTS.map(w => w.equipment)))].sort();
@@ -118,7 +124,16 @@ export default function Workouts() {
   const [selectedWorkout, setSelectedWorkout] = useState<WorkoutDetail | null>(null);
 
   const filteredWorkouts = WORKOUTS.filter(w => {
-    const catMatch = activeCategory === 'All' || w.category === activeCategory;
+    let catMatch = false;
+    if (activeCategory === 'All') {
+      catMatch = true;
+    } else if (activeCategory === 'Gym') {
+      const nonGym = ['bodyweight', 'body weight', 'yoga mat', 'assisted', 'band', 'rope', 'roller'];
+      catMatch = !nonGym.some(eq => w.equipment.toLowerCase().includes(eq));
+    } else {
+      catMatch = w.category === activeCategory;
+    }
+    
     const levelMatch = activeLevel === 'All Levels' || w.level === activeLevel;
     const typeMatch = activeType === 'All Types' || w.type === activeType;
     const equipMatch = activeEquipment === 'All Equipment' || w.equipment === activeEquipment;
