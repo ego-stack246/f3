@@ -1,5 +1,5 @@
 import { NavLink, Link, useNavigate } from 'react-router-dom';
-import { Dumbbell, LayoutDashboard, Play, Activity, Calculator, Trophy, Menu, X, LogIn, LogOut, User as UserIcon, Flame, ShieldCheck, Accessibility } from 'lucide-react';
+import { Dumbbell, LayoutDashboard, Play, Activity, Calculator, Trophy, Menu, X, LogIn, LogOut, User as UserIcon, Flame, ShieldCheck, Accessibility, Users } from 'lucide-react';
 import { useState, useRef, useEffect } from 'react';
 import { cn } from '../lib/utils';
 import { useAuth } from '../context/AuthContext';
@@ -34,6 +34,7 @@ export default function Navbar() {
       { to: '/library', label: 'Exercise Library', icon: Activity },
       { to: '/calculator', label: 'Calorie Calc', icon: Calculator },
       { to: '/leaderboard', label: 'Leaderboard', icon: Trophy },
+      { to: '/community', label: 'Community', icon: Users },
     ] : [])
   ];
 

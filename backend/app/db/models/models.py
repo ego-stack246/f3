@@ -71,3 +71,28 @@ class Meal(Base):
     fat_g = Column(Float)
     source = Column(String)
     confidence = Column(String, nullable=True)
+
+class Post(Base):
+    __tablename__ = 'posts'
+    id = Column(UUID(as_uuid=True), primary_key=True, default=uuid.uuid4)
+    user_id = Column(UUID(as_uuid=True), ForeignKey('users.id'))
+    content = Column(String)
+    image_url = Column(String, nullable=True)
+    created_at = Column(DateTime, default=datetime.datetime.utcnow)
+    likes_count = Column(Integer, default=0)
+
+class Story(Base):
+    __tablename__ = 'stories'
+    id = Column(UUID(as_uuid=True), primary_key=True, default=uuid.uuid4)
+    user_id = Column(UUID(as_uuid=True), ForeignKey('users.id'))
+    image_url = Column(String)
+    created_at = Column(DateTime, default=datetime.datetime.utcnow)
+
+class Challenge(Base):
+    __tablename__ = 'challenges'
+    id = Column(UUID(as_uuid=True), primary_key=True, default=uuid.uuid4)
+    title = Column(String)
+    description = Column(String)
+    icon = Column(String)
+    participants_count = Column(Integer, default=0)
+

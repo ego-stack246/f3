@@ -12,6 +12,7 @@ import TargetedMuscle from './pages/TargetedMuscle';
 import AnimationsDemo from './pages/AnimationsDemo';
 import ExerciseLibrary from './pages/ExerciseLibrary';
 import Onboarding from './pages/Onboarding';
+import CommunityFeed from './pages/CommunityFeed';
 import ProtectedRoute from './components/ProtectedRoute';
 
 function App() {
@@ -34,6 +35,7 @@ function App() {
               <Route path="animations" element={<AnimationsDemo />} />
               <Route path="library" element={<ExerciseLibrary />} />
               <Route path="onboarding" element={<Onboarding />} />
+              <Route path="community" element={<CommunityFeed />} />
             </Route>
           </Route>
         </Routes>
