@@ -74,6 +74,7 @@ export default function PostureCoach() {
           <div className="bg-black rounded-[1.5rem] overflow-hidden relative">
             <PoseCamera
               exercise={selectedExercise}
+              exerciseTitle={EXERCISE_OPTIONS.find(o => o.value === selectedExercise)?.label}
               enabled={isActive}
               className="border-none w-full"
             />

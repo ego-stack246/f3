@@ -17,6 +17,7 @@ import type { JointPositions } from '../components/exercise/ExerciseFigure';
 export interface UsePoseDetectionOptions {
   exercise: ExerciseType;
   enabled: boolean;
+  isMuted?: boolean;
 }
 
 export interface SessionStats {
@@ -36,9 +37,11 @@ export interface UsePoseDetectionReturn {
   landmarks: Point3D[][] | null;
   stats: SessionStats;
   resetStats: () => void;
+  isMuted: boolean;
+  toggleMute: () => void;
 }
 
-export function usePoseDetection({ exercise, enabled }: UsePoseDetectionOptions): UsePoseDetectionReturn {
+export function usePoseDetection({ exercise, enabled, isMuted: externalMuted }: UsePoseDetectionOptions): UsePoseDetectionReturn {
   const videoRef = useRef<HTMLVideoElement | null>(null);
   const canvasRef = useRef<HTMLCanvasElement | null>(null);
   const poseLandmarkerRef = useRef<PoseLandmarker | null>(null);
@@ -46,25 +49,90 @@ export function usePoseDetection({ exercise, enabled }: UsePoseDetectionOptions)
   const lastTimestampRef = useRef<number>(-1);
   const lastSpeechTimeRef = useRef<number>(0);
   const lastRepTimeRef = useRef<number>(0);
+  const lastRepSpeechTimeRef = useRef<number>(0);
+  const lastFeedbackTimeRef = useRef<number>(0);
+  const lastSpeechTextRef = useRef<string>('');
   const inflectionDwellRef = useRef<number>(0);
 
   // Landmark temporal smoothing cache (Dynamic EMA filter)
   const smoothedLandmarksRef = useRef<Point3D[] | null>(null);
 
-  // Audio configuration
+  // Audio configuration & Mute state
   const synth = typeof window !== 'undefined' ? window.speechSynthesis : null;
+  const [isMuted, setIsMuted] = useState<boolean>(() => {
+    if (externalMuted !== undefined) return externalMuted;
+    if (typeof window !== 'undefined') {
+      return localStorage.getItem('fitsync_voice_muted') === 'true';
+    }
+    return false;
+  });
+
+  const toggleMute = useCallback(() => {
+    setIsMuted((prev) => {
+      const next = !prev;
+      if (typeof window !== 'undefined') {
+        localStorage.setItem('fitsync_voice_muted', String(next));
+      }
+      if (next && synth?.speaking) {
+        synth.cancel();
+      }
+      return next;
+    });
+  }, [synth]);
+
+  const [prevExternalMuted, setPrevExternalMuted] = useState(externalMuted);
+  if (externalMuted !== undefined && externalMuted !== prevExternalMuted) {
+    setPrevExternalMuted(externalMuted);
+    setIsMuted(externalMuted);
+    if (externalMuted && synth?.speaking) {
+      synth.cancel();
+    }
+  }
 
   const speak = useCallback(
     (text: string, isPriority = false) => {
-      if (!synth) return;
+      if (isMuted || !synth) return;
       const now = Date.now();
-      // Throttle speech to avoid overlapping/spamming (every 3s for corrective feedback; immediate for rep counts)
-      if (!isPriority && now - lastSpeechTimeRef.current < 3000) return;
 
-      if (synth.speaking) synth.cancel();
+      if (isPriority) {
+        // Immediate rep counts: throttle at 450ms to prevent double audio on fast bounces
+        if (now - lastRepSpeechTimeRef.current < 450) return;
+
+        if (synth.speaking) synth.cancel();
+
+        const utterance = new SpeechSynthesisUtterance(text);
+        utterance.rate = 1.1;
+        utterance.pitch = 1.0;
+
+        const voices = synth.getVoices();
+        const voice =
+          voices.find((v) => v.lang.startsWith('en') && v.name.includes('Female')) ||
+          voices.find((v) => v.lang.startsWith('en'));
+        if (voice) utterance.voice = voice;
+
+        synth.speak(utterance);
+        lastSpeechTimeRef.current = now;
+        lastRepSpeechTimeRef.current = now;
+        return;
+      }
+
+      // Non-priority corrective coaching feedback:
+      // 1. Never cut off currently speaking voice
+      if (synth.speaking) return;
+
+      // 2. Ensure at least a 2.5-second peaceful gap after any rep announcement
+      if (now - lastRepSpeechTimeRef.current < 2500) return;
+
+      // 3. Spaced repetition guard:
+      // If the feedback text is identical to recent feedback, wait at least 9.5 seconds!
+      // If it's different feedback, wait at least 5.5 seconds.
+      const isRepeatedText = text.trim().toLowerCase() === lastSpeechTextRef.current.trim().toLowerCase();
+      const minGap = isRepeatedText ? 9500 : 5500;
+
+      if (now - lastFeedbackTimeRef.current < minGap) return;
 
       const utterance = new SpeechSynthesisUtterance(text);
-      utterance.rate = isPriority ? 1.15 : 1.0;
+      utterance.rate = 1.0;
       utterance.pitch = 1.0;
 
       const voices = synth.getVoices();
@@ -74,9 +142,11 @@ export function usePoseDetection({ exercise, enabled }: UsePoseDetectionOptions)
       if (voice) utterance.voice = voice;
 
       synth.speak(utterance);
+      lastSpeechTextRef.current = text;
       lastSpeechTimeRef.current = now;
+      lastFeedbackTimeRef.current = now;
     },
-    [synth]
+    [synth, isMuted]
   );
 
   // Rep & Posture tracking refs
@@ -108,6 +178,9 @@ export function usePoseDetection({ exercise, enabled }: UsePoseDetectionOptions)
     startTimeRef.current = Date.now();
     lastSpeechTimeRef.current = 0;
     lastRepTimeRef.current = 0;
+    lastRepSpeechTimeRef.current = 0;
+    lastFeedbackTimeRef.current = 0;
+    lastSpeechTextRef.current = '';
     smoothedLandmarksRef.current = null;
     setStats({ reps: 0, postureScore: 100, elapsedSeconds: 0, calories: 0 });
     if (synth) synth.cancel();
@@ -721,5 +794,5 @@ export function usePoseDetection({ exercise, enabled }: UsePoseDetectionOptions)
     };
   }, [stopCamera]);
 
-  return { videoRef, canvasRef, postureResult, isLoading, isCameraReady, error, landmarks, stats, resetStats };
+  return { videoRef, canvasRef, postureResult, isLoading, isCameraReady, error, landmarks, stats, resetStats, isMuted, toggleMute };
 }

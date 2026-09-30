@@ -1,10 +1,12 @@
-import { useState } from 'react';
-import { Play, Clock, Flame, Filter, Camera, Repeat, Dumbbell, Wrench, Sparkles, ChevronRight } from 'lucide-react';
+import { useState, useMemo } from 'react';
+import { Play, Clock, Flame, Filter, Camera, Repeat, Dumbbell, Wrench, Sparkles, ChevronRight, ChevronLeft, ChevronsLeft, ChevronsRight, Search, X } from 'lucide-react';
 import { cn } from '../lib/utils';
 import ExerciseDetailModal from '../components/ExerciseDetailModal';
 import type { WorkoutDetail } from '../components/ExerciseDetailModal';
 import type { ExerciseType } from '../lib/poseAnalysis';
 import exercisesData from '../data/exercises-library.json';
+
+const ITEMS_PER_PAGE = 100;
 
 
 const capitalize = (s: string) => s.split(' ').map((w: string) => w.charAt(0).toUpperCase() + w.slice(1)).join(' ');
@@ -118,43 +120,143 @@ const TYPES = ['All Types', 'Strength', 'Cardio', 'Flexibility'];
 const EQUIPMENT = ['All Equipment', ...Array.from(new Set(WORKOUTS.map(w => w.equipment)))].sort();
 
 export default function Workouts() {
+  const [searchTerm, setSearchTerm] = useState('');
   const [activeCategory, setActiveCategory] = useState('All');
   const [activeLevel, setActiveLevel] = useState('All Levels');
   const [activeType, setActiveType] = useState('All Types');
   const [activeEquipment, setActiveEquipment] = useState('All Equipment');
   const [selectedWorkout, setSelectedWorkout] = useState<WorkoutDetail | null>(null);
+  const [modalTab, setModalTab] = useState<'overview' | 'camera'>('overview');
+  const [currentPage, setCurrentPage] = useState(1);
 
-  const filteredWorkouts = WORKOUTS.filter(w => {
-    let catMatch = false;
-    if (activeCategory === 'All') {
-      catMatch = true;
-    } else if (activeCategory === 'Gym') {
-      const nonGym = ['bodyweight', 'body weight', 'yoga mat', 'assisted', 'band', 'rope', 'roller'];
-      catMatch = !nonGym.some(eq => w.equipment.toLowerCase().includes(eq));
-    } else {
-      catMatch = w.category === activeCategory;
+  // Reset page when filters or search change
+  const [prevFilters, setPrevFilters] = useState({ activeCategory, activeLevel, activeType, activeEquipment, searchTerm });
+  if (
+    prevFilters.activeCategory !== activeCategory ||
+    prevFilters.activeLevel !== activeLevel ||
+    prevFilters.activeType !== activeType ||
+    prevFilters.activeEquipment !== activeEquipment ||
+    prevFilters.searchTerm !== searchTerm
+  ) {
+    setPrevFilters({ activeCategory, activeLevel, activeType, activeEquipment, searchTerm });
+    setCurrentPage(1);
+  }
+
+  const filteredWorkouts = useMemo(() => {
+    const term = searchTerm.trim().toLowerCase();
+    return WORKOUTS.filter(w => {
+      if (term) {
+        const titleMatch = w.title.toLowerCase().includes(term);
+        const catMatch = w.category.toLowerCase().includes(term);
+        const equipMatch = w.equipment.toLowerCase().includes(term);
+        const typeMatch = w.type.toLowerCase().includes(term);
+        const muscleMatch = w.musclesWorked?.some(m => m.toLowerCase().includes(term));
+        if (!titleMatch && !catMatch && !equipMatch && !typeMatch && !muscleMatch) {
+          return false;
+        }
+      }
+
+      let catMatch = false;
+      if (activeCategory === 'All') {
+        catMatch = true;
+      } else if (activeCategory === 'Gym') {
+        const nonGym = ['bodyweight', 'body weight', 'yoga mat', 'assisted', 'band', 'rope', 'roller'];
+        catMatch = !nonGym.some(eq => w.equipment.toLowerCase().includes(eq));
+      } else {
+        catMatch = w.category === activeCategory;
+      }
+      
+      const levelMatch = activeLevel === 'All Levels' || w.level === activeLevel;
+      const typeMatch = activeType === 'All Types' || w.type === activeType;
+      const equipMatch = activeEquipment === 'All Equipment' || w.equipment === activeEquipment;
+      return catMatch && levelMatch && typeMatch && equipMatch;
+    });
+  }, [activeCategory, activeLevel, activeType, activeEquipment, searchTerm]);
+
+  const totalPages = Math.max(1, Math.ceil(filteredWorkouts.length / ITEMS_PER_PAGE));
+  const safeCurrentPage = Math.min(currentPage, totalPages);
+  const startIndex = (safeCurrentPage - 1) * ITEMS_PER_PAGE;
+  const endIndex = Math.min(startIndex + ITEMS_PER_PAGE, filteredWorkouts.length);
+
+  const paginatedWorkouts = useMemo(() => {
+    return filteredWorkouts.slice(startIndex, endIndex);
+  }, [filteredWorkouts, startIndex, endIndex]);
+
+  const handlePageChange = (newPage: number) => {
+    const target = Math.max(1, Math.min(newPage, totalPages));
+    setCurrentPage(target);
+    window.scrollTo({ top: 0, behavior: 'smooth' });
+  };
+
+  const getPageNumbers = () => {
+    if (totalPages <= 7) {
+      return Array.from({ length: totalPages }, (_, i) => i + 1);
     }
-    
-    const levelMatch = activeLevel === 'All Levels' || w.level === activeLevel;
-    const typeMatch = activeType === 'All Types' || w.type === activeType;
-    const equipMatch = activeEquipment === 'All Equipment' || w.equipment === activeEquipment;
-    return catMatch && levelMatch && typeMatch && equipMatch;
-  });
+    const pages: (number | string)[] = [];
+    pages.push(1);
+    if (safeCurrentPage > 3) {
+      pages.push('ellipsis-start');
+    }
+    const start = Math.max(2, safeCurrentPage - 1);
+    const end = Math.min(totalPages - 1, safeCurrentPage + 1);
+    for (let i = start; i <= end; i++) {
+      pages.push(i);
+    }
+    if (safeCurrentPage < totalPages - 2) {
+      pages.push('ellipsis-end');
+    }
+    pages.push(totalPages);
+    return pages;
+  };
 
   return (
     <div className="space-y-8 animate-fade-in pb-10">
-      <header className="flex flex-col md:flex-row md:items-end justify-between gap-4">
+      <header className="flex flex-col lg:flex-row lg:items-end justify-between gap-4">
         <div>
           <div className="inline-flex items-center gap-2 bg-sage-100 text-sage-700 text-xs font-semibold px-3 py-1 rounded-full mb-2">
             <Sparkles className="w-3.5 h-3.5" /> Interactive Animated Demos & AI Camera
           </div>
           <h1 className="text-3xl font-bold">Routines & Exercises</h1>
-          <p className="text-earth-800/70 mt-1">
-            Tap any exercise card below to view **animated form video**, **step-by-step instructions**, and launch **live AI posture detection**!
+          <p className="text-earth-800/70 mt-1 max-w-2xl">
+            Tap any exercise card below to view animated form video, step-by-step instructions, and launch live AI posture detection!
           </p>
         </div>
-        <div className="text-sm text-earth-800/60 font-medium">
-          Showing {filteredWorkouts.length} of {WORKOUTS.length}
+
+        {/* Search Bar & Result Status */}
+        <div className="flex flex-col sm:flex-row items-stretch sm:items-center gap-3">
+          <div className="relative w-full sm:w-72 md:w-80">
+            <Search className="absolute left-3.5 top-1/2 -translate-y-1/2 w-4 h-4 text-earth-800/40 pointer-events-none" />
+            <input
+              type="text"
+              value={searchTerm}
+              onChange={(e) => setSearchTerm(e.target.value)}
+              placeholder="Search exercise, muscle, gear..."
+              className="w-full bg-white/80 hover:bg-white focus:bg-white border border-earth-900/15 focus:border-sage-500 rounded-2xl pl-10 pr-9 py-2.5 text-sm text-earth-900 placeholder:text-earth-800/40 focus:outline-none transition-all shadow-sm"
+            />
+            {searchTerm && (
+              <button
+                type="button"
+                onClick={() => setSearchTerm('')}
+                className="absolute right-2.5 top-1/2 -translate-y-1/2 p-1 text-earth-800/40 hover:text-earth-900 rounded-full hover:bg-earth-900/5 transition-colors cursor-pointer"
+                title="Clear search"
+              >
+                <X className="w-3.5 h-3.5" />
+              </button>
+            )}
+          </div>
+
+          <div className="text-sm text-earth-800/60 font-medium whitespace-nowrap self-end sm:self-center">
+            {filteredWorkouts.length > 0 ? (
+              <>
+                Showing <span className="font-bold text-earth-900">{startIndex + 1}–{endIndex}</span> of <span className="font-bold text-earth-900">{filteredWorkouts.length.toLocaleString()}</span>
+                {totalPages > 1 && (
+                  <span className="ml-1.5 text-sage-600 font-semibold">(Page {safeCurrentPage} of {totalPages})</span>
+                )}
+              </>
+            ) : (
+              <span className="font-semibold text-earth-800/60">0 results</span>
+            )}
+          </div>
         </div>
       </header>
 
@@ -237,10 +339,13 @@ export default function Workouts() {
 
       {/* Exercise Cards Grid */}
       <div className="grid grid-cols-1 md:grid-cols-2 lg:grid-cols-3 xl:grid-cols-4 gap-5">
-        {filteredWorkouts.map(workout => (
+        {paginatedWorkouts.map(workout => (
           <div
             key={workout.id}
-            onClick={() => setSelectedWorkout(workout)}
+            onClick={() => {
+              setSelectedWorkout(workout);
+              setModalTab('overview');
+            }}
             className="glass-card group overflow-hidden flex flex-col hover:-translate-y-1.5 transition-all duration-300 cursor-pointer border-white/60 hover:shadow-xl hover:border-sage-400"
           >
             {/* Image & Video Play Overlay */}
@@ -273,9 +378,19 @@ export default function Workouts() {
                 <span className="bg-black/50 backdrop-blur px-2 py-0.5 rounded-full flex items-center gap-1">
                   <Play className="w-3 h-3 text-emerald-400" /> Animated Video
                 </span>
-                <span className="bg-black/50 backdrop-blur px-2 py-0.5 rounded-full flex items-center gap-1">
-                  <Camera className="w-3 h-3 text-sage-300" /> AI Camera
-                </span>
+                <button
+                  type="button"
+                  onClick={(e) => {
+                    e.stopPropagation();
+                    setSelectedWorkout(workout);
+                    setModalTab('camera');
+                  }}
+                  className="bg-black/60 hover:bg-emerald-600/80 backdrop-blur px-2.5 py-0.5 rounded-full flex items-center gap-1 text-sage-300 hover:text-white transition-all border border-white/20 hover:border-emerald-400/50 active:scale-95 cursor-pointer shadow-md"
+                  title="Open AI Camera Detection"
+                >
+                  <Camera className="w-3 h-3 text-emerald-400" />
+                  <span className="font-semibold text-white">AI Camera</span>
+                </button>
               </div>
             </div>
 
@@ -309,10 +424,129 @@ export default function Workouts() {
         ))}
       </div>
 
+      {/* Pagination Controls */}
+      {totalPages > 1 && (
+        <div className="flex flex-col sm:flex-row items-center justify-between gap-4 py-4 px-6 bg-white/70 border border-white/60 rounded-2xl backdrop-blur-md shadow-sm">
+          <div className="text-xs text-earth-800/70 font-medium">
+            Page <span className="text-earth-900 font-bold">{safeCurrentPage}</span> of <span className="text-earth-900 font-bold">{totalPages}</span> • <span className="text-sage-700 font-semibold">{ITEMS_PER_PAGE} exercises per page</span>
+          </div>
+
+          <div className="flex items-center gap-1.5 flex-wrap justify-center">
+            <button
+              type="button"
+              onClick={() => handlePageChange(1)}
+              disabled={safeCurrentPage === 1}
+              className="p-2 rounded-xl bg-earth-900/5 hover:bg-earth-900/10 disabled:opacity-25 text-earth-800 transition-colors cursor-pointer disabled:cursor-not-allowed"
+              title="First Page"
+              aria-label="First Page"
+            >
+              <ChevronsLeft className="w-4 h-4" />
+            </button>
+            <button
+              type="button"
+              onClick={() => handlePageChange(safeCurrentPage - 1)}
+              disabled={safeCurrentPage === 1}
+              className="p-2 rounded-xl bg-earth-900/5 hover:bg-earth-900/10 disabled:opacity-25 text-earth-800 transition-colors cursor-pointer disabled:cursor-not-allowed flex items-center gap-1 text-xs font-semibold px-3"
+              title="Previous Page"
+              aria-label="Previous Page"
+            >
+              <ChevronLeft className="w-4 h-4" />
+              <span className="hidden sm:inline">Prev</span>
+            </button>
+
+            {/* Page pills */}
+            <div className="flex items-center gap-1">
+              {getPageNumbers().map((p, idx) => {
+                if (typeof p === 'string') {
+                  return (
+                    <span key={`ellipsis-${idx}`} className="px-2 text-earth-800/30 text-xs select-none">
+                      …
+                    </span>
+                  );
+                }
+                const isActive = p === safeCurrentPage;
+                return (
+                  <button
+                    key={p}
+                    type="button"
+                    onClick={() => handlePageChange(p)}
+                    className={cn(
+                      "w-8 h-8 rounded-xl text-xs font-bold transition-all cursor-pointer",
+                      isActive
+                        ? "bg-sage-600 text-white shadow-md shadow-sage-600/30 scale-105"
+                        : "bg-earth-900/5 hover:bg-earth-900/10 text-earth-800/80 hover:text-earth-900"
+                    )}
+                  >
+                    {p}
+                  </button>
+                );
+              })}
+            </div>
+
+            <button
+              type="button"
+              onClick={() => handlePageChange(safeCurrentPage + 1)}
+              disabled={safeCurrentPage === totalPages}
+              className="p-2 rounded-xl bg-earth-900/5 hover:bg-earth-900/10 disabled:opacity-25 text-earth-800 transition-colors cursor-pointer disabled:cursor-not-allowed flex items-center gap-1 text-xs font-semibold px-3"
+              title="Next Page"
+              aria-label="Next Page"
+            >
+              <span className="hidden sm:inline">Next</span>
+              <ChevronRight className="w-4 h-4" />
+            </button>
+            <button
+              type="button"
+              onClick={() => handlePageChange(totalPages)}
+              disabled={safeCurrentPage === totalPages}
+              className="p-2 rounded-xl bg-earth-900/5 hover:bg-earth-900/10 disabled:opacity-25 text-earth-800 transition-colors cursor-pointer disabled:cursor-not-allowed"
+              title="Last Page"
+              aria-label="Last Page"
+            >
+              <ChevronsRight className="w-4 h-4" />
+            </button>
+          </div>
+
+          <div className="flex items-center gap-2 text-xs text-earth-800/70">
+            <span>Go to:</span>
+            <select
+              value={safeCurrentPage}
+              onChange={(e) => handlePageChange(Number(e.target.value))}
+              className="bg-white/80 border border-earth-900/15 rounded-lg px-2.5 py-1 text-xs text-earth-900 focus:outline-none focus:border-sage-500 cursor-pointer"
+            >
+              {Array.from({ length: totalPages }, (_, i) => i + 1).map((pg) => (
+                <option key={pg} value={pg}>
+                  Page {pg}
+                </option>
+              ))}
+            </select>
+          </div>
+        </div>
+      )}
+
       {filteredWorkouts.length === 0 && (
-        <div className="text-center py-20 text-earth-800/60 flex flex-col items-center gap-2">
-          <Dumbbell className="w-10 h-10 opacity-30" />
-          <p>No workouts match your filters. Try adjusting your selection.</p>
+        <div className="text-center py-20 text-earth-800/60 flex flex-col items-center gap-3">
+          <Dumbbell className="w-12 h-12 opacity-30 text-earth-800" />
+          <p className="font-semibold text-earth-900 text-lg">No exercises found</p>
+          <p className="text-sm text-earth-800/60 max-w-sm">
+            {searchTerm
+              ? `No exercises match "${searchTerm}" with your current filter combination.`
+              : 'No exercises match the selected filters. Try adjusting your selection.'}
+          </p>
+          {(searchTerm || activeCategory !== 'All' || activeLevel !== 'All Levels' || activeType !== 'All Types' || activeEquipment !== 'All Equipment') && (
+            <button
+              type="button"
+              onClick={() => {
+                setSearchTerm('');
+                setActiveCategory('All');
+                setActiveLevel('All Levels');
+                setActiveType('All Types');
+                setActiveEquipment('All Equipment');
+              }}
+              className="mt-2 text-xs font-semibold px-4 py-2 bg-sage-600 hover:bg-sage-700 text-white rounded-xl transition-all shadow-sm cursor-pointer active:scale-95"
+            >
+              Reset Search & Filters
+            </button>
+          )}
         </div>
       )}
 
@@ -321,6 +555,7 @@ export default function Workouts() {
         isOpen={!!selectedWorkout}
         onClose={() => setSelectedWorkout(null)}
         workout={selectedWorkout}
+        initialTab={modalTab}
       />
     </div>
   );

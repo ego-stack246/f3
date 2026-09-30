@@ -1,7 +1,8 @@
-import { useState } from 'react';
-import { X, Play, Camera, CheckCircle2, AlertTriangle, Dumbbell, Flame, Clock, Repeat, Wrench, Sparkles, BrainCircuit } from 'lucide-react';
+import { useState, useRef } from 'react';
+import { X, Play, Camera, CheckCircle2, AlertTriangle, Dumbbell, Flame, Clock, Repeat, Wrench, Sparkles, BrainCircuit, Maximize2, Volume2, VolumeX } from 'lucide-react';
 import { motion, AnimatePresence } from 'framer-motion';
-import PoseCamera from './PoseCamera';
+import { cn } from '../lib/utils';
+import PoseCamera, { type PoseCameraRef } from './PoseCamera';
 import type { ExerciseType } from '../lib/poseAnalysis';
 
 export interface WorkoutDetail {
@@ -23,10 +24,11 @@ export interface WorkoutDetail {
   breathing?: string;
 }
 
-interface ExerciseDetailModalProps {
+export interface ExerciseDetailModalProps {
   workout: WorkoutDetail | null;
   isOpen: boolean;
   onClose: () => void;
+  initialTab?: 'overview' | 'camera' | 'instructions' | 'ai_insights' | 'mistakes';
 }
 
 
@@ -39,8 +41,23 @@ function ExerciseAnimationPlayer({ title, imageUrl }: { title: string, imageUrl:
 }
 
 // ─── Main Modal ───────────────────────────────────────────────────────────────
-export default function ExerciseDetailModal({ workout, isOpen, onClose }: ExerciseDetailModalProps) {
-  const [activeTab, setActiveTab] = useState<'overview' | 'camera' | 'instructions' | 'ai_insights' | 'mistakes'>('overview');
+export default function ExerciseDetailModal({ workout, isOpen, onClose, initialTab = 'overview' }: ExerciseDetailModalProps) {
+  const [activeTab, setActiveTab] = useState<'overview' | 'camera' | 'instructions' | 'ai_insights' | 'mistakes'>(initialTab);
+  const [lastState, setLastState] = useState({ isOpen, initialTab, id: workout?.id });
+  const [isVoiceMuted, setIsVoiceMuted] = useState<boolean>(() => {
+    if (typeof window !== 'undefined') {
+      return localStorage.getItem('fitsync_voice_muted') === 'true';
+    }
+    return false;
+  });
+  const poseCameraRef = useRef<PoseCameraRef | null>(null);
+
+  if (isOpen !== lastState.isOpen || initialTab !== lastState.initialTab || workout?.id !== lastState.id) {
+    setLastState({ isOpen, initialTab, id: workout?.id });
+    if (isOpen) {
+      setActiveTab(initialTab || 'overview');
+    }
+  }
   
   if (!workout || !isOpen) return null;
 
@@ -162,15 +179,58 @@ export default function ExerciseDetailModal({ workout, isOpen, onClose }: Exerci
             {/* AI CAMERA */}
             {activeTab === 'camera' && (
               <motion.div initial={{ opacity: 0, y: 10 }} animate={{ opacity: 1, y: 0 }} className="space-y-4 flex-1 flex flex-col min-h-[50vh]">
-                <div className="flex flex-col sm:flex-row items-start sm:items-center justify-between gap-2 text-sm text-sage-300 bg-emerald-950/30 p-4 rounded-2xl border border-emerald-500/20 shrink-0">
+                <div className="flex flex-col sm:flex-row items-start sm:items-center justify-between gap-3 text-sm text-sage-300 bg-emerald-950/30 p-4 rounded-2xl border border-emerald-500/20 shrink-0">
                   <span className="flex items-center gap-2"><Sparkles className="w-4 h-4 text-emerald-400" /> Center yourself in frame • Ensure full body visibility</span>
-                  <span className="flex items-center gap-2 text-emerald-400 font-bold bg-emerald-500/10 px-3 py-1.5 rounded-full">
-                    <span className="w-2 h-2 rounded-full bg-emerald-400 animate-pulse" /> Live Analysis
-                  </span>
+                  <div className="flex items-center gap-2 flex-wrap">
+                    <span className="flex items-center gap-2 text-emerald-400 font-bold bg-emerald-500/10 px-3 py-1.5 rounded-full text-xs">
+                      <span className="w-2 h-2 rounded-full bg-emerald-400 animate-pulse" /> Live Analysis
+                    </span>
+                    <button
+                      type="button"
+                      onClick={() => {
+                        poseCameraRef.current?.toggleMute();
+                      }}
+                      className={cn(
+                        "flex items-center gap-1.5 text-xs font-bold px-3 py-1.5 rounded-full transition-all shadow-md active:scale-95 cursor-pointer border",
+                        isVoiceMuted
+                          ? "bg-red-900/40 hover:bg-red-900/60 text-red-300 border-red-500/40"
+                          : "bg-black/40 hover:bg-black/60 text-white/90 border-white/20 hover:border-emerald-400/50"
+                      )}
+                      title={isVoiceMuted ? "Unmute Voice Coach" : "Mute Voice Coach"}
+                    >
+                      {isVoiceMuted ? (
+                        <>
+                          <VolumeX className="w-3.5 h-3.5 text-red-400" />
+                          <span>Muted</span>
+                        </>
+                      ) : (
+                        <>
+                          <Volume2 className="w-3.5 h-3.5 text-emerald-400" />
+                          <span>Voice</span>
+                        </>
+                      )}
+                    </button>
+                    <button
+                      type="button"
+                      onClick={() => poseCameraRef.current?.toggleFullscreen()}
+                      className="flex items-center gap-1.5 text-xs font-bold text-white bg-sage-600 hover:bg-sage-500 px-3.5 py-1.5 rounded-full transition-all shadow-md active:scale-95 cursor-pointer"
+                      title="Open Camera Detection in Full Screen"
+                    >
+                      <Maximize2 className="w-3.5 h-3.5 text-emerald-300" />
+                      <span>Full Screen</span>
+                    </button>
+                  </div>
                 </div>
-                <div className="flex-1 min-h-[300px] rounded-[2rem] overflow-hidden border-2 border-white/10 shadow-2xl relative group">
+                <div className="flex-1 min-h-[320px] rounded-[2rem] overflow-hidden border-2 border-white/10 shadow-2xl relative group">
                   <div className="absolute inset-0 bg-gradient-to-t from-emerald-900/40 to-transparent pointer-events-none z-10 opacity-0 group-hover:opacity-100 transition-opacity duration-500" />
-                  <PoseCamera exercise={workout.exercise} enabled={activeTab === 'camera'} className="h-full w-full absolute inset-0" />
+                  <PoseCamera
+                    ref={poseCameraRef}
+                    exercise={workout.exercise}
+                    exerciseTitle={workout.title}
+                    enabled={activeTab === 'camera'}
+                    onMuteChange={setIsVoiceMuted}
+                    className="h-full w-full absolute inset-0"
+                  />
                 </div>
               </motion.div>
             )}
@@ -237,13 +297,37 @@ export default function ExerciseDetailModal({ workout, isOpen, onClose }: Exerci
 
           {/* Footer */}
           <div className="p-6 border-t border-white/5 bg-gradient-to-t from-black/40 to-transparent flex flex-col sm:flex-row items-center justify-end gap-4 relative z-20">
-            {activeTab !== 'camera' && (
+            {activeTab !== 'camera' ? (
               <button
                 onClick={() => setActiveTab('camera')}
                 className="w-full sm:w-auto px-8 py-3.5 bg-gradient-to-r from-emerald-500 to-sage-600 hover:from-emerald-400 hover:to-sage-500 text-white rounded-2xl text-sm font-bold shadow-[0_0_20px_-5px_rgba(16,185,129,0.4)] transition-all duration-300 flex items-center justify-center gap-2 hover:scale-105 active:scale-95"
               >
                 <Camera className="w-4 h-4" /> Start AI Form Check
               </button>
+            ) : (
+              <div className="flex flex-wrap items-center gap-3 w-full sm:w-auto justify-end">
+                <button
+                  type="button"
+                  onClick={() => poseCameraRef.current?.toggleMute()}
+                  className={cn(
+                    "px-5 py-3.5 rounded-2xl text-sm font-bold transition-all shadow-md flex items-center justify-center gap-2 active:scale-95 cursor-pointer border",
+                    isVoiceMuted
+                      ? "bg-red-500/20 hover:bg-red-500/30 text-red-300 border-red-500/40"
+                      : "bg-white/10 hover:bg-white/20 text-white border-white/15"
+                  )}
+                  title={isVoiceMuted ? "Unmute Voice Coach" : "Mute Voice Coach"}
+                >
+                  {isVoiceMuted ? <VolumeX className="w-4 h-4 text-red-400" /> : <Volume2 className="w-4 h-4 text-emerald-400" />}
+                  <span>{isVoiceMuted ? "Unmute Voice" : "Mute Voice"}</span>
+                </button>
+                <button
+                  type="button"
+                  onClick={() => poseCameraRef.current?.toggleFullscreen()}
+                  className="px-8 py-3.5 bg-gradient-to-r from-emerald-500 to-sage-600 hover:from-emerald-400 hover:to-sage-500 text-white rounded-2xl text-sm font-bold shadow-[0_0_20px_-5px_rgba(16,185,129,0.4)] transition-all duration-300 flex items-center justify-center gap-2 hover:scale-105 active:scale-95 cursor-pointer"
+                >
+                  <Maximize2 className="w-4 h-4" /> Full Screen Camera
+                </button>
+              </div>
             )}
             <button onClick={onClose} className="w-full sm:w-auto px-8 py-3.5 bg-white/5 hover:bg-white/10 border border-white/10 text-white rounded-2xl text-sm font-bold transition-all duration-300 hover:scale-105 active:scale-95">
               Close

@@ -1,5 +1,6 @@
-import { X, Activity } from 'lucide-react';
-import PoseCamera from './PoseCamera';
+import { useRef, useState } from 'react';
+import { X, Activity, Maximize2, Volume2, VolumeX } from 'lucide-react';
+import PoseCamera, { type PoseCameraRef } from './PoseCamera';
 import type { ExerciseType } from '../lib/poseAnalysis';
 import { motion, AnimatePresence } from 'framer-motion';
 
@@ -11,6 +12,14 @@ interface WorkoutPostureModalProps {
 }
 
 export default function WorkoutPostureModal({ isOpen, onClose, workoutTitle, exercise }: WorkoutPostureModalProps) {
+  const poseCameraRef = useRef<PoseCameraRef | null>(null);
+  const [isVoiceMuted, setIsVoiceMuted] = useState<boolean>(() => {
+    if (typeof window !== 'undefined') {
+      return localStorage.getItem('fitsync_voice_muted') === 'true';
+    }
+    return false;
+  });
+
   return (
     <AnimatePresence>
       {isOpen && (
@@ -42,19 +51,47 @@ export default function WorkoutPostureModal({ isOpen, onClose, workoutTitle, exe
                   <p className="text-white/50 text-xs">AI Posture Correction Active</p>
                 </div>
               </div>
-              <button
-                onClick={onClose}
-                className="p-2 rounded-xl bg-white/10 hover:bg-white/20 text-white transition-colors"
-              >
-                <X className="w-5 h-5" />
-              </button>
+              <div className="flex items-center gap-2">
+                <button
+                  type="button"
+                  onClick={() => poseCameraRef.current?.toggleMute()}
+                  className="p-2 rounded-xl bg-white/10 hover:bg-white/20 text-white transition-colors cursor-pointer"
+                  title={isVoiceMuted ? "Unmute Voice Coach" : "Mute Voice Coach"}
+                  aria-label={isVoiceMuted ? "Unmute Voice Coach" : "Mute Voice Coach"}
+                >
+                  {isVoiceMuted ? (
+                    <VolumeX className="w-5 h-5 text-red-400" />
+                  ) : (
+                    <Volume2 className="w-5 h-5 text-emerald-400" />
+                  )}
+                </button>
+                <button
+                  type="button"
+                  onClick={() => poseCameraRef.current?.toggleFullscreen()}
+                  className="p-2 rounded-xl bg-white/10 hover:bg-white/20 text-white transition-colors cursor-pointer"
+                  title="Full Screen Camera"
+                  aria-label="Full Screen Camera"
+                >
+                  <Maximize2 className="w-5 h-5 text-emerald-400" />
+                </button>
+                <button
+                  onClick={onClose}
+                  className="p-2 rounded-xl bg-white/10 hover:bg-white/20 text-white transition-colors"
+                  aria-label="Close"
+                >
+                  <X className="w-5 h-5" />
+                </button>
+              </div>
             </div>
 
             {/* Camera */}
             <div className="flex-1 min-h-0">
               <PoseCamera
+                ref={poseCameraRef}
                 exercise={exercise}
+                exerciseTitle={workoutTitle}
                 enabled={isOpen}
+                onMuteChange={setIsVoiceMuted}
                 className="h-full border border-white/10"
               />
             </div>
