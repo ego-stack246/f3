@@ -74,15 +74,15 @@ export async function safeGenerateContent(params: {
 
     if (response.ok) {
       const data = await response.json();
-      return { text: data.choices[0].message.content };
+      if (data.choices?.[0]?.message?.content) {
+        return { text: data.choices[0].message.content };
+      }
     } else {
       const errorText = await response.text();
-      console.error("OpenRouter API error:", errorText);
-      return { text: `⚠️ OpenRouter API Error: ${errorText}` };
+      console.warn("OpenRouter API error (falling back to local AI):", errorText);
     }
   } catch (err: any) {
-    console.warn('OpenRouter API call failed:', err);
-    return { text: `⚠️ Fetch Error: ${err.message}` };
+    console.warn('OpenRouter API call failed (falling back to local AI):', err);
   }
 
   // --- LOCAL SMART AI FALLBACK ---
@@ -139,7 +139,7 @@ export async function safeGenerateContent(params: {
   // Otherwise treat as FitBot conversation
   const userQuery = extractLastUserQuery(params.contents).toLowerCase();
 
-  let text = "I am currently running in **Offline/Fallback Mode** because the Gemini API key in your `.env` file is invalid. A real Gemini API key starts with `AIzaSy`.\n\nTo unlock my full AI brain, please:\n1. Go to [Google AI Studio](https://aistudio.google.com/app/apikey)\n2. Create a free API key\n3. Paste it into your `.env` file as `VITE_GEMINI_API_KEY=AIzaSy...`\n\nFor now, here is a detailed response from my built-in knowledge base:\n\n";
+  let text = "I am currently running in **Offline Mode** with my built-in fitness knowledge base.\n\nTo connect my live AI brain via OpenRouter:\n1. Open [openrouter.ai/keys](https://openrouter.ai/keys)\n2. Create a free API key\n3. Add it to your `.env` file as `VITE_OPENROUTER_API_KEY=sk-or-v1-...`\n\nHere is information from my built-in fitness database:\n\n";
 
   if (userQuery.includes('meal plan') || userQuery.includes('diet') || userQuery.includes('weight loss')) {
     text += "🥗 **Personalized Healthy Diet Plan Strategy**:\n\n" +
@@ -173,12 +173,14 @@ export async function safeGenerateContent(params: {
       "4. **Recovery**: Muscles grow while you sleep! Aim for 7-8 hours a night.";
   } else {
     text += "Hello! 👋 I am currently in Offline Mode.\n\n" +
-      "I noticed your `VITE_GEMINI_API_KEY` in the `.env` file is invalid. To unlock my full conversational abilities where I can answer ANY question dynamically, please get a free Gemini API key from [Google AI Studio](https://aistudio.google.com/app/apikey) and put it in your `.env` file.\n\n" +
+      "To enable live dynamic conversations with the cloud AI model:\n" +
+      "1. Generate a free API key at [openrouter.ai/keys](https://openrouter.ai/keys)\n" +
+      "2. Save it in your `.env` file as `VITE_OPENROUTER_API_KEY=sk-or-v1-...`\n\n" +
       "In the meantime, you can ask me about:\n" +
       "- **Meal plans** and diets\n" +
       "- **Home workouts**\n" +
       "- **Building muscle**\n" +
-      "- **Calories**";
+      "- **Calories & metabolism**";
   }
 
   return { text };
